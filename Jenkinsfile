@@ -1,4 +1,4 @@
-pipeline {
+pipeline { 
     agent any
 
     environment {
@@ -45,7 +45,6 @@ pipeline {
         choice(name: 'CHECK_DELETE', choices: ['false', 'true'], description: 'Solicitar confirmación antes de eliminar recursos')
         choice(name: 'AUTO_DELETE_DISK', choices: ['true', 'false'], description: 'Eliminar automáticamente el disco al eliminar la VM')
 
-        // Nuevo parámetro: elegir qué acción ejecutar
         choice(name: 'TERRAFORM_ACTION', choices: ['plan', 'apply', 'destroy'], description: 'Acción de Terraform a ejecutar')
     }
 
@@ -104,6 +103,10 @@ pipeline {
             }
         }
 
+        // =============================================================
+        // SECCIÓN DE TERRAFORM COMENTADA
+        // =============================================================
+        /*
         stage('Terraform Execution') {
             steps {
                 dir('terraform') {
@@ -130,6 +133,38 @@ pipeline {
                             """
                         }
                     }
+                }
+            }
+        }
+        */
+
+        // =============================================================
+        // NUEVA SECCIÓN: CONEXIÓN REAL A JIRA (via curl)
+        // =============================================================
+        stage('Conexión a JIRA') {
+            steps {
+                script {
+                    def jiraUrl = "https://bancoripley1.atlassian.net/rest/api/3/issue/AJI-1"
+                    def jiraToken = "ATATT3xFfGF0DfFWblu-HI0b1BGrgGvn0w6hYNsbmP5dmT_tWoMQo3SVjqKRwfwVvDSycjs1iOdwPuMoFdSFiKFK_u_o7aE0izoIBR5wBDtHCabcwSoc6B4U9KlKLeKdMOQbsioIE8pcMdTty16nmQJgBSsfVTMclqFi_bb3Cet_V8dOEsLWAmQ=6C2FB431"
+
+                    echo "================================================"
+                    echo "             CONEXIÓN A JIRA (curl)             "
+                    echo "================================================"
+
+                    sh """
+                        echo 'Intentando conexión con ${jiraUrl}'
+                        response=\$(curl -s -o /dev/null -w "%{http_code}" -X GET "${jiraUrl}/rest/api/3/project" \
+                        -H "Authorization: Bearer ${jiraToken}" \
+                        -H "Content-Type: application/json")
+
+                        echo "Código de respuesta HTTP: \$response"
+
+                        if [ "\$response" = "200" ]; then
+                            echo "Conexión exitosa con JIRA"
+                        else
+                            echo "Error al conectar con JIRA (código \$response)"
+                        fi
+                    """
                 }
             }
         }
