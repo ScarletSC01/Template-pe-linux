@@ -5,6 +5,9 @@ pipeline {
         PAIS = 'PE'
         SISTEMA_OPERATIVO_BASE = 'Linux'
         SNAPSHOT_ENABLED = 'true'
+
+        // URL de la API de Jira (puedes cambiar el issue según necesites)
+        JIRA_API_URL = 'https://bancoripley1.atlassian.net/rest/api/3/issue/AJI-1'
     }
 
     options {
@@ -47,6 +50,7 @@ pipeline {
     }
 
     stages {
+
         stage('Validación de Parámetros') {
             steps {
                 script {
@@ -107,28 +111,24 @@ pipeline {
         stage('Post-Jira Status') {
             steps {
                 script {
-                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'TOKEN_JIRA')]) {
-                        def auth = "${JIRA_USER}:${TOKEN_JIRA}".bytes.encodeBase64().toString()
+                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
+                        def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
                         def response = sh(
                             script: """
-                                curl -s --http1.1 -X GET "https://bancoripley1.atlassian.net/rest/api/3/issue/AJI-1" \\
+                                curl -s -X GET "${JIRA_API_URL}" \\
                                 -H "Authorization: Basic ${auth}" \\
-                                -H "Accept: application/json"
+                                -H "Accept: application/json" \\
+                                --http1.1
                             """,
                             returnStdout: true
                         ).trim()
 
-                        echo "Respuesta de Jira:"
-                        echo response
-
-                        // Intentar mostrar solo el statusCategory
-                        try {
-                            def json = readJSON text: response
-                            def statusCategory = json.fields.status.statusCategory
-                            echo "StatusCategory: ${statusCategory}"
-                        } catch (err) {
-                            echo "No se pudo parsear el JSON o no se encontró el campo esperado"
-                        }
+                        def json = new groovy.json.JsonSlurper().parseText(response)
+                        def estado = json.fields.status.name
+                        echo "================================================"
+                        echo " Estado actual del ticket JIRA:"
+                        echo " ${JIRA_API_URL}: ${estado}"
+                        echo "================================================"
                     }
                 }
             }
