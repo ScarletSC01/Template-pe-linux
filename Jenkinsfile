@@ -140,32 +140,32 @@ pipeline {
         // NUEVA SECCIÓN: CONEXIÓN REAL A JIRA (via credenciales Jenkins)
         // =============================================================
         stage('Conexión a JIRA') {
-            steps {
-                withCredentials([string(credentialsId: 'JIRA_TOKEN', variable: 'JIRA_TOKEN')]) {
-                    script {
-                        def jiraIssue = "AJI-1"
-                        def jiraUrl = "https://bancoripley1.atlassian.net/rest/api/3/issue/${jiraIssue}"
+    steps {
+        script {
+            def jiraUrl = "https://bancoripley1.atlassian.net/rest/api/3/issue/AJI-1"
+            def jiraUser = "sebastian.riveros@accenture.com" // Email del usuario
+            // Token secreto guardado en Jenkins
+            withCredentials([string(credentialsId: 'JIRA_TOKEN', variable: 'JIRA_API_TOKEN')]) {
+                sh """
+                    echo "Consultando el issue AJI-1 en Jira..."
+                    # Codifica email:token en Base64
+                    auth=\$(echo -n "${jiraUser}:\$JIRA_API_TOKEN" | base64)
+                    
+                    # Llamada a la API Jira usando Basic Auth
+                    response=\$(curl -s -H "Authorization: Basic \$auth" \
+                                      -H "Accept: application/json" \
+                                      "${jiraUrl}")
 
-                        echo "================================================"
-                        echo "             CONEXIÓN A JIRA (curl)             "
-                        echo "================================================"
-
-                        sh """
-                            echo 'Consultando el issue ${jiraIssue} en Jira...'
-
-                            # Ejecutamos curl con autorización usando JIRA_TOKEN
-                            response=\$(curl -s -H "Authorization: Bearer \$JIRA_TOKEN" -H "Accept: application/json" ${jiraUrl})
-
-                            # Extraemos solo el bloque "status" usando jq
-                            echo "Status del issue:"
-                            echo "\$(echo \$response | jq '.fields.status')"
-                        """
-                    }
-                }
+                    echo "Respuesta de Jira:"
+                    echo "\$response"
+                    
+                    status=\$(echo "\$response" | jq -r '.fields.status.name')
+                    echo "Status del issue: \$status"
+                """
             }
         }
     }
-
+}
     post {
         success {
             echo "Pipeline ejecutado exitosamente"
