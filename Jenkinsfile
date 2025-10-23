@@ -102,64 +102,33 @@ pipeline {
         }
 
         // =============================================================
-        // SECCIÓN DE TERRAFORM COMENTADA
+        // NUEVA SECCIÓN: CONEXIÓN A JIRA USANDO CREDENCIALES
         // =============================================================
-        /*
-        stage('Terraform Execution') {
-            steps {
-                dir('terraform') {
-                    script {
-                        withCredentials([file(credentialsId: 'gcp-sa-platform', variable: 'GOOGLE_CREDENTIALS')]) {
-                            sh """
-                                export GOOGLE_APPLICATION_CREDENTIALS=\$GOOGLE_CREDENTIALS
-                                echo '================================================'
-                                echo '         EJECUTANDO TERRAFORM: ${params.TERRAFORM_ACTION.toUpperCase()}'
-                                echo '================================================'
-
-                                terraform init
-
-                                if [ "${params.TERRAFORM_ACTION}" = "plan" ]; then
-                                    terraform plan -out=tfplan
-                                elif [ "${params.TERRAFORM_ACTION}" = "apply" ]; then
-                                    terraform apply -auto-approve
-                                elif [ "${params.TERRAFORM_ACTION}" = "destroy" ]; then
-                                    terraform destroy -auto-approve
-                                else
-                                    echo "Acción no válida seleccionada."
-                                    exit 1
-                                fi
-                            """
-                        }
-                    }
-                }
-            }
-        }
-        */
-
-        // =============================================================
-        // NUEVA SECCIÓN: CONEXIÓN A JIRA (Forzando HTTP/1.1)
-        // =============================================================
-        stage('Conexión a JIRA') {
+        stage('Post-Jira Status') {
             steps {
                 script {
-                    def jiraUrl = "https://bancoripley1.atlassian.net/rest/api/3/issue/AJI-1"
-                    def jiraUser = "sebastian.riveros@accenture.com" // Email del usuario
+                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'TOKEN_JIRA')]) {
+                        def auth = "${JIRA_USER}:${TOKEN_JIRA}".bytes.encodeBase64().toString()
+                        def response = sh(
+                            script: """
+                                curl -s --http1.1 -X GET "https://bancoripley1.atlassian.net/rest/api/3/issue/AJI-1" \\
+                                -H "Authorization: Basic ${auth}" \\
+                                -H "Accept: application/json"
+                            """,
+                            returnStdout: true
+                        ).trim()
 
-                    withCredentials([string(credentialsId: 'JIRA_TOKEN', variable: 'JIRA_API_TOKEN')]) {
-                        sh """
-                            echo "Consultando el issue AJI-1 en Jira..."
-                            auth=\$(echo -n "${jiraUser}:\$JIRA_API_TOKEN" | base64)
+                        echo "Respuesta de Jira:"
+                        echo response
 
-                            response=\$(curl -s --http1.1 -H "Authorization: Basic \$auth" \
-                                              -H "Accept: application/json" \
-                                              "${jiraUrl}")
-
-                            echo "Respuesta de Jira:"
-                            echo "\$response"
-
-                            status=\$(echo "\$response" | jq -r '.fields.status.name')
-                            echo "Status del issue: \$status"
-                        """
+                        // Intentar mostrar solo el statusCategory
+                        try {
+                            def json = readJSON text: response
+                            def statusCategory = json.fields.status.statusCategory
+                            echo "StatusCategory: ${statusCategory}"
+                        } catch (err) {
+                            echo "No se pudo parsear el JSON o no se encontró el campo esperado"
+                        }
                     }
                 }
             }
@@ -180,4 +149,4 @@ pipeline {
             echo "================================================"
         }
     }
-} 
+}
