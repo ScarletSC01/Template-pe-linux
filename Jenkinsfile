@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         PAIS = 'PE'
-        SISTEMA_OPERATIVO_BASE = 'Windows'
+        SISTEMA_OPERATIVO_BASE = 'Linux'
         SNAPSHOT_ENABLED = 'true'
         JIRA_API_URL = "https://bancoripley1.atlassian.net/rest/api/3/issue/"
     }
@@ -20,12 +20,12 @@ pipeline {
         string(name: 'ZONE', defaultValue: 'us-central1-a', description: 'Zona de disponibilidad específica')
         choice(name: 'ENVIRONMENT', choices: ['desarrollo-1', 'pre-productivo-2', 'produccion-3'], description: 'Ambiente de despliegue de la infraestructura')
 
-        string(name: 'VM_NAME', defaultValue: 'vm-pe-windows', description: 'Nombre único para la máquina virtual')
+        string(name: 'VM_NAME', defaultValue: 'vm-pe-linux', description: 'Nombre único para la máquina virtual')
         choice(name: 'PROCESSOR_TECH', choices: ['n2', 'e2'], description: 'Tecnología de procesador')
         choice(name: 'VM_TYPE', choices: ['n2-standard', 'e2-standard'], description: 'Familia de tipo de máquina virtual')
         string(name: 'VM_CORES', defaultValue: '2', description: 'Número de vCPUs para la máquina virtual')
         string(name: 'VM_MEMORY', defaultValue: '8', description: 'Memoria RAM en GB')
-        choice(name: 'OS_TYPE', choices: ['windows-2025', 'windows-2025-core', 'windows-2022'], description: 'Versión del sistema operativo')
+        choice(name: 'OS_TYPE', choices: ['linux-ubuntu-22', 'linux-ubuntu-20', 'linux-debian-12'], description: 'Versión del sistema operativo')
         string(name: 'DISK_SIZE', defaultValue: '100', description: 'Tamaño del disco persistente en GB')
         choice(name: 'DISK_TYPE', choices: ['pd-ssd', 'pd-balanced', 'pd-standard'], description: 'Tipo de disco')
         choice(name: 'INFRAESTRUCTURE_TYPE', choices: ['On-demand', 'Preemptible'], description: 'Tipo de infraestructura')
@@ -37,7 +37,7 @@ pipeline {
         choice(name: 'PRIVATE_IP', choices: ['true', 'false'], description: 'Asignar IP privada estática')
         choice(name: 'PUBLIC_IP', choices: ['false', 'true'], description: 'Asignar IP pública externa')
 
-        string(name: 'FIREWALL_RULES', defaultValue: 'allow-rdp,allow-winrm', description: 'Reglas de firewall separadas por comas')
+        string(name: 'FIREWALL_RULES', defaultValue: 'allow-ssh', description: 'Reglas de firewall separadas por comas')
         string(name: 'SERVICE_ACCOUNT', defaultValue: 'sa-plataforma@jenkins-terraform-demo-472920.iam.gserviceaccount.com', description: 'Cuenta de servicio para la VM')
         string(name: 'LABEL', defaultValue: '', description: 'Etiquetas personalizadas para la VM')
         choice(name: 'ENABLE_STARTUP_SCRIPT', choices: ['false', 'true'], description: 'Habilitar script de inicio personalizado')
@@ -111,8 +111,8 @@ pipeline {
                 dir('terraform') {
                     script {
                         withCredentials([file(credentialsId: 'gcp-sa-platform', variable: 'GOOGLE_CREDENTIALS')]) {
-                            bat """
-                                set GOOGLE_APPLICATION_CREDENTIALS=%GOOGLE_CREDENTIALS%
+                            sh """
+                                export GOOGLE_APPLICATION_CREDENTIALS=$GOOGLE_CREDENTIALS
                                 terraform init
                                 terraform plan -out=tfplan
                             """
@@ -127,8 +127,8 @@ pipeline {
                 dir('terraform') {
                     script {
                         withCredentials([file(credentialsId: 'gcp-sa-platform', variable: 'GOOGLE_CREDENTIALS')]) {
-                            bat """
-                                set GOOGLE_APPLICATION_CREDENTIALS=%GOOGLE_CREDENTIALS%
+                            sh """
+                                export GOOGLE_APPLICATION_CREDENTIALS=$GOOGLE_CREDENTIALS
                                 terraform apply tfplan
                             """
                         }
@@ -139,14 +139,14 @@ pipeline {
 
         stage('Terraform Destroy') {
             when {
-                expression { return params.ENVIRONMENT == '3-Producción' }
+                expression { return params.ENVIRONMENT == 'produccion-3' }
             }
             steps {
                 dir('terraform') {
                     script {
                         withCredentials([file(credentialsId: 'gcp-sa-platform', variable: 'GOOGLE_CREDENTIALS')]) {
-                            bat """
-                                set GOOGLE_APPLICATION_CREDENTIALS=%GOOGLE_CREDENTIALS%
+                            sh """
+                                export GOOGLE_APPLICATION_CREDENTIALS=$GOOGLE_CREDENTIALS
                                 terraform destroy -auto-approve
                             """
                         }
@@ -156,16 +156,16 @@ pipeline {
         }
         */
 
-        // NUEVO BLOQUE 1: CONSULTA ESTADO EN JIRA 
+        // 🔹 BLOQUE 1: CONSULTA ESTADO EN JIRA 
         stage('Post-Jira Status') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
                         def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
-                        def response = bat(
+                        def response = sh(
                             script: """
-                                curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" ^
-                                -H "Authorization: Basic ${auth}" ^
+                                curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \\
+                                -H "Authorization: Basic ${auth}" \\
                                 -H "Accept: application/json"
                             """,
                             returnStdout: true
@@ -178,20 +178,36 @@ pipeline {
             }
         }
 
-        // NUEVO BLOQUE 2: COMENTAR EN JIRA 
+        // 🔹 BLOQUE 2: COMENTAR EN JIRA 
         stage('Post-Coment-jira') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
                         def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
-                        def comentario = "Este ticket fue comentado por Lucaneitor"
+                        def comentario = "Este ticket fue comentado por Scarlet SC"
 
-                        def response = bat(
+                        def response = sh(
                             script: """
-                                curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" ^
-                                -H "Authorization: Basic ${auth}" ^
-                                -H "Content-Type: application/json" ^
-                                -d "{\\"body\\": {\\"type\\": \\"doc\\", \\"version\\": 1, \\"content\\": [{\\"type\\": \\"paragraph\\", \\"content\\": [{\\"type\\": \\"text\\", \\"text\\": \\"${comentario}\\"}]}]}}"
+                                curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" \\
+                                -H "Authorization: Basic ${auth}" \\
+                                -H "Content-Type: application/json" \\
+                                -d '{
+                                    "body": {
+                                        "type": "doc",
+                                        "version": 1,
+                                        "content": [
+                                            {
+                                                "type": "paragraph",
+                                                "content": [
+                                                    {
+                                                        "type": "text",
+                                                        "text": "${comentario}"
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }'
                             """,
                             returnStdout: true
                         ).trim()
