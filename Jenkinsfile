@@ -137,33 +137,34 @@ pipeline {
         */
 
         // =============================================================
-        // NUEVA SECCIÓN: CONEXIÓN A JIRA (Basic Auth usando credenciales)
+        // NUEVA SECCIÓN: CONEXIÓN A JIRA (Forzando HTTP/1.1)
         // =============================================================
-       stage('Conexión a JIRA') {
-    steps {
-        script {
-            def jiraUrl = "https://bancoripley1.atlassian.net/rest/api/3/issue/AJI-1"
-            def jiraUser = "sebastian.riveros@accenture.com"
+        stage('Conexión a JIRA') {
+            steps {
+                script {
+                    def jiraUrl = "https://bancoripley1.atlassian.net/rest/api/3/issue/AJI-1"
+                    def jiraUser = "sebastian.riveros@accenture.com" // Email del usuario
 
-            withCredentials([string(credentialsId: 'JIRA_TOKEN', variable: 'JIRA_API_TOKEN')]) {
-                sh """
-                    echo "Consultando el issue AJI-1 en Jira..."
-                    auth=\$(echo -n "${jiraUser}:\$JIRA_API_TOKEN" | base64)
+                    withCredentials([string(credentialsId: 'JIRA_TOKEN', variable: 'JIRA_API_TOKEN')]) {
+                        sh """
+                            echo "Consultando el issue AJI-1 en Jira..."
+                            auth=\$(echo -n "${jiraUser}:\$JIRA_API_TOKEN" | base64)
 
-                    response=\$(curl -s --http1.1 -H "Authorization: Basic \$auth" \
-                                      -H "Accept: application/json" \
-                                      "${jiraUrl}")
+                            response=\$(curl -s --http1.1 -H "Authorization: Basic \$auth" \
+                                              -H "Accept: application/json" \
+                                              "${jiraUrl}")
 
-                    echo "Respuesta de Jira:"
-                    echo "\$response"
+                            echo "Respuesta de Jira:"
+                            echo "\$response"
 
-                    status=\$(echo "\$response" | jq -r '.fields.status.name')
-                    echo "Status del issue: \$status"
-                """
+                            status=\$(echo "\$response" | jq -r '.fields.status.name')
+                            echo "Status del issue: \$status"
+                        """
+                    }
+                }
             }
         }
     }
-}
 
     post {
         success {
@@ -179,4 +180,4 @@ pipeline {
             echo "================================================"
         }
     }
-}
+} 
