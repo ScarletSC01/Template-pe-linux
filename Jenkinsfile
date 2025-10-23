@@ -1,13 +1,11 @@
-pipeline { 
+pipeline {
     agent any
 
     environment {
         PAIS = 'PE'
-        SISTEMA_OPERATIVO_BASE = 'Linux'
+        SISTEMA_OPERATIVO_BASE = 'Windows'
         SNAPSHOT_ENABLED = 'true'
-
-        // URL de la API de Jira (puedes cambiar el issue según necesites)
-        JIRA_API_URL = 'https://bancoripley1.atlassian.net/rest/api/3/issue/AJI-1'
+        JIRA_API_URL = "https://bancoripley1.atlassian.net/rest/api/3/issue/"
     }
 
     options {
@@ -22,13 +20,12 @@ pipeline {
         string(name: 'ZONE', defaultValue: 'us-central1-a', description: 'Zona de disponibilidad específica')
         choice(name: 'ENVIRONMENT', choices: ['desarrollo-1', 'pre-productivo-2', 'produccion-3'], description: 'Ambiente de despliegue de la infraestructura')
 
-        string(name: 'VM_NAME', defaultValue: 'vm-pe-linux', description: 'Nombre único para la máquina virtual')
+        string(name: 'VM_NAME', defaultValue: 'vm-pe-windows', description: 'Nombre único para la máquina virtual')
         choice(name: 'PROCESSOR_TECH', choices: ['n2', 'e2'], description: 'Tecnología de procesador')
         choice(name: 'VM_TYPE', choices: ['n2-standard', 'e2-standard'], description: 'Familia de tipo de máquina virtual')
         string(name: 'VM_CORES', defaultValue: '2', description: 'Número de vCPUs para la máquina virtual')
         string(name: 'VM_MEMORY', defaultValue: '8', description: 'Memoria RAM en GB')
-
-        choice(name: 'OS_TYPE', choices: ['debian-11', 'debian-12'], description: 'Versión del sistema operativo Linux')
+        choice(name: 'OS_TYPE', choices: ['windows-2025', 'windows-2025-core', 'windows-2022'], description: 'Versión del sistema operativo')
         string(name: 'DISK_SIZE', defaultValue: '100', description: 'Tamaño del disco persistente en GB')
         choice(name: 'DISK_TYPE', choices: ['pd-ssd', 'pd-balanced', 'pd-standard'], description: 'Tipo de disco')
         choice(name: 'INFRAESTRUCTURE_TYPE', choices: ['On-demand', 'Preemptible'], description: 'Tipo de infraestructura')
@@ -40,17 +37,19 @@ pipeline {
         choice(name: 'PRIVATE_IP', choices: ['true', 'false'], description: 'Asignar IP privada estática')
         choice(name: 'PUBLIC_IP', choices: ['false', 'true'], description: 'Asignar IP pública externa')
 
-        string(name: 'FIREWALL_RULES', defaultValue: 'allow-ssh', description: 'Reglas de firewall separadas por comas')
+        string(name: 'FIREWALL_RULES', defaultValue: 'allow-rdp,allow-winrm', description: 'Reglas de firewall separadas por comas')
         string(name: 'SERVICE_ACCOUNT', defaultValue: 'sa-plataforma@jenkins-terraform-demo-472920.iam.gserviceaccount.com', description: 'Cuenta de servicio para la VM')
         string(name: 'LABEL', defaultValue: '', description: 'Etiquetas personalizadas para la VM')
         choice(name: 'ENABLE_STARTUP_SCRIPT', choices: ['false', 'true'], description: 'Habilitar script de inicio personalizado')
         choice(name: 'ENABLE_DELETION_PROTECTION', choices: ['false', 'true'], description: 'Proteger la VM contra eliminación accidental')
         choice(name: 'CHECK_DELETE', choices: ['false', 'true'], description: 'Solicitar confirmación antes de eliminar recursos')
         choice(name: 'AUTO_DELETE_DISK', choices: ['true', 'false'], description: 'Eliminar automáticamente el disco al eliminar la VM')
+
+        // 🔹 Nuevo parámetro para ticket Jira
+        string(name: 'TICKET_JIRA', defaultValue: 'AJI-1', description: 'Ticket de Jira a consultar y comentar')
     }
 
     stages {
-
         stage('Validación de Parámetros') {
             steps {
                 script {
@@ -105,30 +104,99 @@ pipeline {
             }
         }
 
-        // =============================================================
-        // NUEVA SECCIÓN: CONEXIÓN A JIRA USANDO CREDENCIALES
-        // =============================================================
+        // --- BLOQUES TERRAFORM COMENTADOS ---
+        /*
+        stage('Terraform Init & Plan') {
+            steps {
+                dir('terraform') {
+                    script {
+                        withCredentials([file(credentialsId: 'gcp-sa-platform', variable: 'GOOGLE_CREDENTIALS')]) {
+                            bat """
+                                set GOOGLE_APPLICATION_CREDENTIALS=%GOOGLE_CREDENTIALS%
+                                terraform init
+                                terraform plan -out=tfplan
+                            """
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
+            steps {
+                dir('terraform') {
+                    script {
+                        withCredentials([file(credentialsId: 'gcp-sa-platform', variable: 'GOOGLE_CREDENTIALS')]) {
+                            bat """
+                                set GOOGLE_APPLICATION_CREDENTIALS=%GOOGLE_CREDENTIALS%
+                                terraform apply tfplan
+                            """
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Terraform Destroy') {
+            when {
+                expression { return params.ENVIRONMENT == '3-Producción' }
+            }
+            steps {
+                dir('terraform') {
+                    script {
+                        withCredentials([file(credentialsId: 'gcp-sa-platform', variable: 'GOOGLE_CREDENTIALS')]) {
+                            bat """
+                                set GOOGLE_APPLICATION_CREDENTIALS=%GOOGLE_CREDENTIALS%
+                                terraform destroy -auto-approve
+                            """
+                        }
+                    }
+                }
+            }
+        }
+        */
+
+        // NUEVO BLOQUE 1: CONSULTA ESTADO EN JIRA 
         stage('Post-Jira Status') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
                         def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
-                        def response = sh(
+                        def response = bat(
                             script: """
-                                curl -s -X GET "${JIRA_API_URL}" \\
-                                -H "Authorization: Basic ${auth}" \\
-                                -H "Accept: application/json" \\
-                                --http1.1
+                                curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" ^
+                                -H "Authorization: Basic ${auth}" ^
+                                -H "Accept: application/json"
+                            """,
+                            returnStdout: true
+                        ).trim()
+                        def json = new groovy.json.JsonSlurper().parseText(response)
+                        def estado = json.fields.status.name
+                        echo "Estado actual del ticket ${params.TICKET_JIRA}: ${estado}"
+                    }
+                }
+            }
+        }
+
+        // NUEVO BLOQUE 2: COMENTAR EN JIRA 
+        stage('Post-Coment-jira') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
+                        def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
+                        def comentario = "Este ticket fue comentado por Lucaneitor"
+
+                        def response = bat(
+                            script: """
+                                curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" ^
+                                -H "Authorization: Basic ${auth}" ^
+                                -H "Content-Type: application/json" ^
+                                -d "{\\"body\\": {\\"type\\": \\"doc\\", \\"version\\": 1, \\"content\\": [{\\"type\\": \\"paragraph\\", \\"content\\": [{\\"type\\": \\"text\\", \\"text\\": \\"${comentario}\\"}]}]}}"
                             """,
                             returnStdout: true
                         ).trim()
 
-                        def json = new groovy.json.JsonSlurper().parseText(response)
-                        def estado = json.fields.status.name
-                        echo "================================================"
-                        echo " Estado actual del ticket JIRA:"
-                        echo " ${JIRA_API_URL}: ${estado}"
-                        echo "================================================"
+                        echo "Comentario enviado al ticket ${params.TICKET_JIRA}: ${response}"
                     }
                 }
             }
