@@ -30,7 +30,7 @@ FIREWALL_RULES           = "allow-rdp,allow-winrm"               # Reglas de fir
 
 SERVICE_ACCOUNT          = "sa-plataforma@jenkins-terraform-demo-472920.iam.gserviceaccount.com"  # Cuenta de servicio
 
-LABEL                    = ""                                    # Etiquetas personalizadas para la VM (ejemplo: "ambiente=dev,pais=pe")
+LABEL                    = "app=demo"                                    # Etiquetas personalizadas para la VM (ejemplo: "ambiente=dev,pais=pe")
 
 ENABLE_STARTUP_SCRIPT    = false                                 # Habilitar script de inicio personalizado
 ENABLE_DELETION_PROTECTION = false                               # Proteger VM contra eliminación accidental
