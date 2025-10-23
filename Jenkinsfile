@@ -44,8 +44,6 @@ pipeline {
         choice(name: 'ENABLE_DELETION_PROTECTION', choices: ['false', 'true'], description: 'Proteger la VM contra eliminación accidental')
         choice(name: 'CHECK_DELETE', choices: ['false', 'true'], description: 'Solicitar confirmación antes de eliminar recursos')
         choice(name: 'AUTO_DELETE_DISK', choices: ['true', 'false'], description: 'Eliminar automáticamente el disco al eliminar la VM')
-
-        choice(name: 'TERRAFORM_ACTION', choices: ['plan', 'apply', 'destroy'], description: 'Acción de Terraform a ejecutar')
     }
 
     stages {
@@ -139,32 +137,30 @@ pipeline {
         */
 
         // =============================================================
-        // NUEVA SECCIÓN: CONEXIÓN REAL A JIRA (via curl)
+        // NUEVA SECCIÓN: CONEXIÓN REAL A JIRA (via credenciales Jenkins)
         // =============================================================
         stage('Conexión a JIRA') {
             steps {
-                script {
-                    def jiraUrl = "https://bancoripley1.atlassian.net/rest/api/3/issue/AJI-1"
-                    def jiraToken = "ATATT3xFfGF0DfFWblu-HI0b1BGrgGvn0w6hYNsbmP5dmT_tWoMQo3SVjqKRwfwVvDSycjs1iOdwPuMoFdSFiKFK_u_o7aE0izoIBR5wBDtHCabcwSoc6B4U9KlKLeKdMOQbsioIE8pcMdTty16nmQJgBSsfVTMclqFi_bb3Cet_V8dOEsLWAmQ=6C2FB431"
+                withCredentials([string(credentialsId: 'JIRA_TOKEN', variable: 'JIRA_TOKEN')]) {
+                    script {
+                        def jiraIssue = "AJI-1"
+                        def jiraUrl = "https://bancoripley1.atlassian.net/rest/api/3/issue/${jiraIssue}"
 
-                    echo "================================================"
-                    echo "             CONEXIÓN A JIRA (curl)             "
-                    echo "================================================"
+                        echo "================================================"
+                        echo "             CONEXIÓN A JIRA (curl)             "
+                        echo "================================================"
 
-                    sh """
-                        echo 'Intentando conexión con ${jiraUrl}'
-                        response=\$(curl -s -o /dev/null -w "%{http_code}" -X GET "${jiraUrl}/rest/api/3/project" \
-                        -H "Authorization: Bearer ${jiraToken}" \
-                        -H "Content-Type: application/json")
+                        sh """
+                            echo 'Consultando el issue ${jiraIssue} en Jira...'
 
-                        echo "Código de respuesta HTTP: \$response"
+                            # Ejecutamos curl con autorización usando JIRA_TOKEN
+                            response=\$(curl -s -H "Authorization: Bearer \$JIRA_TOKEN" -H "Accept: application/json" ${jiraUrl})
 
-                        if [ "\$response" = "200" ]; then
-                            echo "Conexión exitosa con JIRA"
-                        else
-                            echo "Error al conectar con JIRA (código \$response)"
-                        fi
-                    """
+                            # Extraemos solo el bloque "status" usando jq
+                            echo "Status del issue:"
+                            echo "\$(echo \$response | jq '.fields.status')"
+                        """
+                    }
                 }
             }
         }
