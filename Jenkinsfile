@@ -52,20 +52,20 @@ pipeline {
         stage('Validación de Parámetros') {
             steps {
                 script {
-                    echo "================================================"
-                    echo "         VALIDACIÓN DE PARÁMETROS              "
-                    echo "================================================"
+                echo "================================================"
+                echo "         VALIDACIÓN DE PARÁMETROS              "
+                echo "================================================"
 
-                    def errores = []
-                    if (!params.SUBNET?.trim()) errores.add("El parámetro SUBNET no puede estar vacío")
-                    if (!params.NETWORK_SEGMENT?.trim()) errores.add("El parámetro NETWORK_SEGMENT no puede estar vacío")
+                def errores = []
+                if (!params.SUBNET?.trim()) errores.add("El parámetro SUBNET no puede estar vacío")
+                if (!params.NETWORK_SEGMENT?.trim()) errores.add("El parámetro NETWORK_SEGMENT no puede estar vacío")
 
-                    if (errores.size() > 0) {
-                        echo "Errores encontrados:"
-                        errores.each { echo "  - ${it}" }
-                        error("Validación fallida")
-                    }
-                    echo "Validación completada correctamente"
+                if (errores.size() > 0) {
+                    echo "Errores encontrados:"
+                    errores.each { echo "  - ${it}" }
+                    error("Validación fallida")
+                }
+                echo "Validación completada correctamente"
                 }
             }
         }
@@ -103,10 +103,10 @@ pipeline {
                                 "body": {
                                     "type": "doc",
                                     "version": 1,
-                                    "content": [{
+                                    "content": [ {
                                         "type": "paragraph",
-                                        "content": [{"type": "text", "text": "${comentario}"}]
-                                    }]
+                                        "content": [ { "type": "text", "text": "${comentario}" } ]
+                                    } ]
                                 }
                             }'
                         """
@@ -137,10 +137,10 @@ pipeline {
                 script {
                     def teamsWebhookUrl = 'https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR-A1'
 
-                    // Formatear parámetros en tabla Markdown
-                    def parametros = "| Parámetro | Valor |\n|------------|--------|\n"
+                    // Formato vertical tipo lista
+                    def parametros = ""
                     params.each { key, value ->
-                        parametros += "| ${key} | ${value} |\n"
+                        parametros += "**${key}:** ${value}\\n"
                     }
 
                     def message = """
@@ -149,8 +149,8 @@ pipeline {
                         "@context": "http://schema.org/extensions",
                         "summary": "Notificación de Jenkins",
                         "themeColor": "0076D7",
-                        "title": "Pipeline finalizado - Linux",
-                        "text": "El pipeline ha finalizado correctamente y el ticket **${params.TICKET_JIRA}** fue marcado como *Finalizado* en Jira.\\n\\n**Parámetros de ejecución:**\\n${parametros}"
+                        "title": "Pipeline finalizado - Linux-pe",
+                        "text": "El pipeline ha finalizado correctamente.\\n\\nTicket **${params.TICKET_JIRA}** marcado como *Finalizado* en Jira.\\n\\n**Parámetros ejecutados:**\\n${parametros}"
                     }
                     """
 
