@@ -45,7 +45,6 @@ pipeline {
         choice(name: 'CHECK_DELETE', choices: ['false', 'true'], description: 'Solicitar confirmación antes de eliminar recursos')
         choice(name: 'AUTO_DELETE_DISK', choices: ['true', 'false'], description: 'Eliminar automáticamente el disco al eliminar la VM')
 
-        // 🔹 Nuevo parámetro para ticket Jira
         string(name: 'TICKET_JIRA', defaultValue: 'AJI-1', description: 'Ticket de Jira a consultar y comentar')
     }
 
@@ -104,72 +103,28 @@ pipeline {
             }
         }
 
-        // --- BLOQUES TERRAFORM COMENTADOS ---
         /*
         stage('Terraform Init & Plan') {
             steps {
-                dir('terraform') {
-                    script {
-                        withCredentials([file(credentialsId: 'gcp-sa-platform', variable: 'GOOGLE_CREDENTIALS')]) {
-                            sh """
-                                export GOOGLE_APPLICATION_CREDENTIALS=$GOOGLE_CREDENTIALS
-                                terraform init
-                                terraform plan -out=tfplan
-                            """
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Terraform Apply') {
-            steps {
-                dir('terraform') {
-                    script {
-                        withCredentials([file(credentialsId: 'gcp-sa-platform', variable: 'GOOGLE_CREDENTIALS')]) {
-                            sh """
-                                export GOOGLE_APPLICATION_CREDENTIALS=$GOOGLE_CREDENTIALS
-                                terraform apply tfplan
-                            """
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Terraform Destroy') {
-            when {
-                expression { return params.ENVIRONMENT == 'produccion-3' }
-            }
-            steps {
-                dir('terraform') {
-                    script {
-                        withCredentials([file(credentialsId: 'gcp-sa-platform', variable: 'GOOGLE_CREDENTIALS')]) {
-                            sh """
-                                export GOOGLE_APPLICATION_CREDENTIALS=$GOOGLE_CREDENTIALS
-                                terraform destroy -auto-approve
-                            """
-                        }
-                    }
-                }
+                echo "Ejemplo de ejecución Terraform (comentado)"
             }
         }
         */
 
-        // 🔹 BLOQUE 1: CONSULTA ESTADO EN JIRA 
-        stage('Post-Jira Status') {
+        stage('Consultar Estado en Jira') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
                         def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
                         def response = sh(
                             script: """
-                                curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \\
-                                -H "Authorization: Basic ${auth}" \\
+                                curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \
+                                -H "Authorization: Basic ${auth}" \
                                 -H "Accept: application/json"
                             """,
                             returnStdout: true
                         ).trim()
+
                         def json = new groovy.json.JsonSlurper().parseText(response)
                         def estado = json.fields.status.name
                         echo "Estado actual del ticket ${params.TICKET_JIRA}: ${estado}"
@@ -178,42 +133,71 @@ pipeline {
             }
         }
 
-        // 🔹 BLOQUE 2: COMENTAR EN JIRA 
-        stage('Post-Coment-jira') {
+        stage('Comentar en Jira') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
                         def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
-                        def comentario = "Este ticket fue comentado por Scarlet SC"
+                        def comentario = "El ticket fue comentado y cerrado automáticamente por Jenkins."
 
-                        def response = sh(
-                            script: """
-                                curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" \\
-                                -H "Authorization: Basic ${auth}" \\
-                                -H "Content-Type: application/json" \\
-                                -d '{
-                                    "body": {
-                                        "type": "doc",
-                                        "version": 1,
-                                        "content": [
-                                            {
-                                                "type": "paragraph",
-                                                "content": [
-                                                    {
-                                                        "type": "text",
-                                                        "text": "${comentario}"
-                                                    }
-                                                ]
-                                            }
-                                        ]
-                                    }
-                                }'
-                            """,
-                            returnStdout: true
-                        ).trim()
-
-                        echo "Comentario enviado al ticket ${params.TICKET_JIRA}: ${response}"
+                        sh """
+                            curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" \
+                            -H "Authorization: Basic ${auth}" \
+                            -H "Content-Type: application/json" \
+                            -d '{
+                                "body": {
+                                    "type": "doc",
+                                    "version": 1,
+                                    "content": [{
+                                        "type": "paragraph",
+                                        "content": [{"type": "text", "text": "${comentario}"}]
+                                    }]
+                                }
+                            }'
+                        """
                     }
+                }
+            }
+        }
+
+        stage('Marcar Ticket como Finalizado en Jira') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
+                        def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
+
+                        sh """
+                            curl -s -X POST "https://bancoripley1.atlassian.net/rest/api/3/issue/${params.TICKET_JIRA}/transitions" \
+                            -H "Authorization: Basic ${auth}" \
+                            -H "Content-Type: application/json" \
+                            -d '{"transition": {"id": "31"}}'
+                        """
+
+                        echo "Ticket ${params.TICKET_JIRA} marcado como 'Finalizado'."
+                    }
+                }
+            }
+        }
+
+        stage('Notify Teams') {
+            steps {
+                script {
+                    def teamsWebhookUrl = 'https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR-A1'
+                    def message = """
+                    {
+                        "@type": "MessageCard",
+                        "@context": "http://schema.org/extensions",
+                        "summary": "Notificación de Jenkins",
+                        "themeColor": "0076D7",
+                        "title": "Pipeline ejecutado",
+                        "text": "Mensaje enviado por Scarlet SC desde Pipeline Jenkins ha finalizado en el stage Notify Teams."
+                    }
+                    """
+                    sh """
+                        curl -H 'Content-Type: application/json' \
+                            -d '${message}' \
+                            '${teamsWebhookUrl}'
+                    """
                 }
             }
         }
@@ -234,3 +218,4 @@ pipeline {
         }
     }
 }
+
