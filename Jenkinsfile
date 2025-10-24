@@ -133,144 +133,34 @@ pipeline {
                 script {
                     def teamsWebhookUrl = 'https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR-A1'
 
-                    // Variables ocultas primero
-                    def ocultas = """
-PAIS
-País de despliegue
-${env.PAIS}
+                    // Ordenar parámetros (ocultos primero, luego visibles)
+                    def orden = [
+                        'PAIS', 'SISTEMA_OPERATIVO_BASE', 'SNAPSHOT_ENABLED', 'JIRA_API_URL',
+                        'PROYECT_ID', 'REGION', 'ZONE', 'ENVIRONMENT', 'VM_NAME', 'PROCESSOR_TECH',
+                        'VM_TYPE', 'VM_CORES', 'VM_MEMORY', 'OS_TYPE', 'DISK_SIZE', 'DISK_TYPE',
+                        'INFRAESTRUCTURE_TYPE', 'VPC_NETWORK', 'SUBNET', 'NETWORK_SEGMENT',
+                        'INTERFACE', 'PRIVATE_IP', 'PUBLIC_IP', 'FIREWALL_RULES', 'SERVICE_ACCOUNT',
+                        'LABEL', 'ENABLE_STARTUP_SCRIPT', 'ENABLE_DELETION_PROTECTION', 'CHECK_DELETE',
+                        'AUTO_DELETE_DISK', 'TICKET_JIRA'
+                    ]
 
-SISTEMA_OPERATIVO_BASE
-Sistema operativo base
-${env.SISTEMA_OPERATIVO_BASE}
-
-SNAPSHOT_ENABLED
-Habilita snapshot
-${env.SNAPSHOT_ENABLED}
-
-JIRA_API_URL
-URL de la API de Jira
-${env.JIRA_API_URL}
-"""
-
-                    // Variables visibles (parámetros) en orden
-                    def parametros = """
-PROYECT_ID
-ID del proyecto en Google Cloud Platform
-${params.PROYECT_ID}
-
-REGION
-Región de GCP donde se desplegará la VM
-${params.REGION}
-
-ZONE
-Zona de disponibilidad específica
-${params.ZONE}
-
-ENVIRONMENT
-Ambiente de despliegue
-${params.ENVIRONMENT}
-
-VM_NAME
-Nombre único para la máquina virtual
-${params.VM_NAME}
-
-PROCESSOR_TECH
-Tecnología de procesador
-${params.PROCESSOR_TECH}
-
-VM_TYPE
-Familia de máquina virtual
-${params.VM_TYPE}
-
-VM_CORES
-Número de vCPUs
-${params.VM_CORES}
-
-VM_MEMORY
-Memoria RAM en GB
-${params.VM_MEMORY}
-
-OS_TYPE
-Versión del sistema operativo
-${params.OS_TYPE}
-
-DISK_SIZE
-Tamaño del disco (GB)
-${params.DISK_SIZE}
-
-DISK_TYPE
-Tipo de disco
-${params.DISK_TYPE}
-
-INFRAESTRUCTURE_TYPE
-Tipo de infraestructura
-${params.INFRAESTRUCTURE_TYPE}
-
-VPC_NETWORK
-Nombre de la red VPC
-${params.VPC_NETWORK}
-
-SUBNET
-Subred
-${params.SUBNET}
-
-NETWORK_SEGMENT
-Segmento de red CIDR
-${params.NETWORK_SEGMENT}
-
-INTERFACE
-Interfaz de red principal
-${params.INTERFACE}
-
-PRIVATE_IP
-Asignar IP privada
-${params.PRIVATE_IP}
-
-PUBLIC_IP
-Asignar IP pública
-${params.PUBLIC_IP}
-
-FIREWALL_RULES
-Reglas de firewall
-${params.FIREWALL_RULES}
-
-SERVICE_ACCOUNT
-Cuenta de servicio
-${params.SERVICE_ACCOUNT}
-
-LABEL
-Etiquetas personalizadas
-${params.LABEL}
-
-ENABLE_STARTUP_SCRIPT
-Script de inicio
-${params.ENABLE_STARTUP_SCRIPT}
-
-ENABLE_DELETION_PROTECTION
-Protección contra eliminación
-${params.ENABLE_DELETION_PROTECTION}
-
-CHECK_DELETE
-Confirmación antes de eliminar
-${params.CHECK_DELETE}
-
-AUTO_DELETE_DISK
-Eliminar disco al borrar VM
-${params.AUTO_DELETE_DISK}
-
-TICKET_JIRA
-Ticket de Jira
-${params.TICKET_JIRA}
-"""
+                    def parametros = orden.collect { key ->
+                        if (params.containsKey(key)) {
+                            return "${key} ${params[key]}"
+                        } else if (env.containsKey(key)) {
+                            return "${key} ${env[key]}"
+                        }
+                        return null
+                    }.findAll { it != null }.join("\n")
 
                     def message = """
                     {
                         "@type": "MessageCard",
                         "@context": "http://schema.org/extensions",
-                        "summary": "Pipeline finalizado - Linux",
+                        "summary": "Notificación de Jenkins",
                         "themeColor": "0076D7",
-                        "title": "Ejecución completada - Ticket ${params.TICKET_JIRA}",
-                        "text": "El pipeline ha finalizado correctamente y el ticket fue marcado como *Finalizado* en Jira.\\n\\n${ocultas}${parametros}"
+                        "title": "Pipeline finalizado - Linux",
+                        "text": "**El pipeline ha finalizado correctamente y el ticket fue marcado como Finalizado en Jira.**\\n${parametros}"
                     }
                     """
 
@@ -299,4 +189,3 @@ ${params.TICKET_JIRA}
         }
     }
 }
-
