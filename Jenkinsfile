@@ -1,4 +1,4 @@
-pipeline {
+pipeline { 
     agent any
 
     environment {
@@ -19,7 +19,6 @@ pipeline {
         string(name: 'REGION', defaultValue: 'us-central1', description: 'Región de GCP donde se desplegará la VM')
         string(name: 'ZONE', defaultValue: 'us-central1-a', description: 'Zona de disponibilidad específica')
         choice(name: 'ENVIRONMENT', choices: ['desarrollo-1', 'pre-productivo-2', 'produccion-3'], description: 'Ambiente de despliegue')
-
         string(name: 'VM_NAME', defaultValue: 'vm-pe-linux', description: 'Nombre único para la máquina virtual')
         choice(name: 'PROCESSOR_TECH', choices: ['n2', 'e2'], description: 'Tecnología de procesador')
         choice(name: 'VM_TYPE', choices: ['n2-standard', 'e2-standard'], description: 'Familia de máquina virtual')
@@ -29,14 +28,12 @@ pipeline {
         string(name: 'DISK_SIZE', defaultValue: '100', description: 'Tamaño del disco (GB)')
         choice(name: 'DISK_TYPE', choices: ['pd-ssd', 'pd-balanced', 'pd-standard'], description: 'Tipo de disco')
         choice(name: 'INFRAESTRUCTURE_TYPE', choices: ['On-demand', 'Preemptible'], description: 'Tipo de infraestructura')
-
         string(name: 'VPC_NETWORK', defaultValue: 'vpc-pe-01', description: 'Nombre de la red VPC')
         string(name: 'SUBNET', defaultValue: 'subnet-pe-01', description: 'Subred')
         string(name: 'NETWORK_SEGMENT', defaultValue: '10.0.1.0/24', description: 'Segmento de red CIDR')
         string(name: 'INTERFACE', defaultValue: 'nic0', description: 'Interfaz de red principal')
         choice(name: 'PRIVATE_IP', choices: ['true', 'false'], description: 'Asignar IP privada')
         choice(name: 'PUBLIC_IP', choices: ['false', 'true'], description: 'Asignar IP pública')
-
         string(name: 'FIREWALL_RULES', defaultValue: 'allow-ssh', description: 'Reglas de firewall')
         string(name: 'SERVICE_ACCOUNT', defaultValue: 'sa-plataforma@jenkins-terraform-demo-472920.iam.gserviceaccount.com', description: 'Cuenta de servicio')
         string(name: 'LABEL', defaultValue: '', description: 'Etiquetas personalizadas')
@@ -44,7 +41,6 @@ pipeline {
         choice(name: 'ENABLE_DELETION_PROTECTION', choices: ['false', 'true'], description: 'Protección contra eliminación')
         choice(name: 'CHECK_DELETE', choices: ['false', 'true'], description: 'Confirmación antes de eliminar')
         choice(name: 'AUTO_DELETE_DISK', choices: ['true', 'false'], description: 'Eliminar disco al borrar VM')
-
         string(name: 'TICKET_JIRA', defaultValue: 'AJI-1', description: 'Ticket de Jira')
     }
 
@@ -52,20 +48,20 @@ pipeline {
         stage('Validación de Parámetros') {
             steps {
                 script {
-                echo "================================================"
-                echo "         VALIDACIÓN DE PARÁMETROS              "
-                echo "================================================"
+                    echo "================================================"
+                    echo "         VALIDACIÓN DE PARÁMETROS              "
+                    echo "================================================"
 
-                def errores = []
-                if (!params.SUBNET?.trim()) errores.add("El parámetro SUBNET no puede estar vacío")
-                if (!params.NETWORK_SEGMENT?.trim()) errores.add("El parámetro NETWORK_SEGMENT no puede estar vacío")
+                    def errores = []
+                    if (!params.SUBNET?.trim()) errores.add("El parámetro SUBNET no puede estar vacío")
+                    if (!params.NETWORK_SEGMENT?.trim()) errores.add("El parámetro NETWORK_SEGMENT no puede estar vacío")
 
-                if (errores.size() > 0) {
-                    echo "Errores encontrados:"
-                    errores.each { echo "  - ${it}" }
-                    error("Validación fallida")
-                }
-                echo "Validación completada correctamente"
+                    if (errores.size() > 0) {
+                        echo "Errores encontrados:"
+                        errores.each { echo "  - ${it}" }
+                        error("Validación fallida")
+                    }
+                    echo "Validación completada correctamente"
                 }
             }
         }
@@ -103,10 +99,10 @@ pipeline {
                                 "body": {
                                     "type": "doc",
                                     "version": 1,
-                                    "content": [ {
+                                    "content": [{
                                         "type": "paragraph",
-                                        "content": [ { "type": "text", "text": "${comentario}" } ]
-                                    } ]
+                                        "content": [{"type": "text", "text": "${comentario}"}]
+                                    }]
                                 }
                             }'
                         """
@@ -137,20 +133,144 @@ pipeline {
                 script {
                     def teamsWebhookUrl = 'https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR-A1'
 
-                    // Formato vertical tipo lista
-                    def parametros = ""
-                    params.each { key, value ->
-                        parametros += "**${key}:** ${value}\\n"
-                    }
+                    // Variables ocultas primero
+                    def ocultas = """
+PAIS
+País de despliegue
+${env.PAIS}
+
+SISTEMA_OPERATIVO_BASE
+Sistema operativo base
+${env.SISTEMA_OPERATIVO_BASE}
+
+SNAPSHOT_ENABLED
+Habilita snapshot
+${env.SNAPSHOT_ENABLED}
+
+JIRA_API_URL
+URL de la API de Jira
+${env.JIRA_API_URL}
+"""
+
+                    // Variables visibles (parámetros) en orden
+                    def parametros = """
+PROYECT_ID
+ID del proyecto en Google Cloud Platform
+${params.PROYECT_ID}
+
+REGION
+Región de GCP donde se desplegará la VM
+${params.REGION}
+
+ZONE
+Zona de disponibilidad específica
+${params.ZONE}
+
+ENVIRONMENT
+Ambiente de despliegue
+${params.ENVIRONMENT}
+
+VM_NAME
+Nombre único para la máquina virtual
+${params.VM_NAME}
+
+PROCESSOR_TECH
+Tecnología de procesador
+${params.PROCESSOR_TECH}
+
+VM_TYPE
+Familia de máquina virtual
+${params.VM_TYPE}
+
+VM_CORES
+Número de vCPUs
+${params.VM_CORES}
+
+VM_MEMORY
+Memoria RAM en GB
+${params.VM_MEMORY}
+
+OS_TYPE
+Versión del sistema operativo
+${params.OS_TYPE}
+
+DISK_SIZE
+Tamaño del disco (GB)
+${params.DISK_SIZE}
+
+DISK_TYPE
+Tipo de disco
+${params.DISK_TYPE}
+
+INFRAESTRUCTURE_TYPE
+Tipo de infraestructura
+${params.INFRAESTRUCTURE_TYPE}
+
+VPC_NETWORK
+Nombre de la red VPC
+${params.VPC_NETWORK}
+
+SUBNET
+Subred
+${params.SUBNET}
+
+NETWORK_SEGMENT
+Segmento de red CIDR
+${params.NETWORK_SEGMENT}
+
+INTERFACE
+Interfaz de red principal
+${params.INTERFACE}
+
+PRIVATE_IP
+Asignar IP privada
+${params.PRIVATE_IP}
+
+PUBLIC_IP
+Asignar IP pública
+${params.PUBLIC_IP}
+
+FIREWALL_RULES
+Reglas de firewall
+${params.FIREWALL_RULES}
+
+SERVICE_ACCOUNT
+Cuenta de servicio
+${params.SERVICE_ACCOUNT}
+
+LABEL
+Etiquetas personalizadas
+${params.LABEL}
+
+ENABLE_STARTUP_SCRIPT
+Script de inicio
+${params.ENABLE_STARTUP_SCRIPT}
+
+ENABLE_DELETION_PROTECTION
+Protección contra eliminación
+${params.ENABLE_DELETION_PROTECTION}
+
+CHECK_DELETE
+Confirmación antes de eliminar
+${params.CHECK_DELETE}
+
+AUTO_DELETE_DISK
+Eliminar disco al borrar VM
+${params.AUTO_DELETE_DISK}
+
+TICKET_JIRA
+Ticket de Jira
+${params.TICKET_JIRA}
+"""
 
                     def message = """
                     {
                         "@type": "MessageCard",
                         "@context": "http://schema.org/extensions",
-                        "summary": "Notificación de Jenkins",
+                        "summary": "Pipeline finalizado - Linux",
                         "themeColor": "0076D7",
-                        "title": "Pipeline finalizado - Linux-pe",
-                        "text": "El pipeline ha finalizado correctamente.\\n\\nTicket **${params.TICKET_JIRA}** marcado como *Finalizado* en Jira.\\n\\n**Parámetros ejecutados:**\\n${parametros}"
+                        "title": "Ejecución completada - Ticket ${params.TICKET_JIRA}",
+                        "text": "El pipeline ha finalizado correctamente y el ticket fue marcado como *Finalizado* en Jira.\\n\\n${ocultas}${parametros}"
                     }
                     """
 
@@ -179,3 +299,4 @@ pipeline {
         }
     }
 }
+
