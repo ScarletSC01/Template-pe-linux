@@ -150,25 +150,72 @@ pipeline {
             }
         }
 
-        stage('Notificación Teams') {
-            steps {
-                script {
-                    writeFile file: 'teams_message.json', text: """
-                    {
-                        "@type": "MessageCard",
-                        "@context": "https://schema.org/extensions",
-                        "summary": "Ejecución de Pipeline completada",
-                        "themeColor": "0078D7",
-                        "title": "Pipeline Jenkins - ${env.PAIS}",
-                        "text": "**VM:** ${params.VM_NAME} (${params.OS_TYPE})\\n**Acción:** Despliegue\\n**Ticket Jira:** ${params.TICKET_JIRA}"
-                    }
+       stage('Validar y Cerrar Ticket Jira') {
+    steps {
+        script {
+            withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
+                def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
+
+                // Consultar estado actual del ticket
+                def ticketResponse = sh(
+                    script: """
+                        curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \\
+                        -H "Authorization: Basic ${auth}" \\
+                        -H "Accept: application/json"
+                    """,
+                    returnStdout: true
+                ).trim()
+                def ticketJson = new groovy.json.JsonSlurper().parseText(ticketResponse)
+                def estadoActual = ticketJson.fields.status.name
+                echo "Estado actual del ticket ${params.TICKET_JIRA}: ${estadoActual}"
+
+                // Consultar transiciones posibles
+                def transitionsResponse = sh(
+                    script: """
+                        curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \\
+                        -H "Authorization: Basic ${auth}" \\
+                        -H "Accept: application/json"
+                    """,
+                    returnStdout: true
+                ).trim()
+                def transitionsJson = new groovy.json.JsonSlurper().parseText(transitionsResponse)
+
+                // Buscar transición a 'Finalizado'
+                def cerrarTransition = transitionsJson.transitions.find { it.name.toLowerCase().contains('finalizado') || it.name.toLowerCase().contains('done') }
+                
+                if (estadoActual.toLowerCase() == 'en curso' && cerrarTransition != null) {
+                    // Cambiar estado a Finalizado automáticamente
+                    sh """
+                        curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \\
+                        -H "Authorization: Basic ${auth}" \\
+                        -H "Content-Type: application/json" \\
+                        -d '{ "transition": { "id": "${cerrarTransition.id}" } }'
                     """
-                    sh "curl -H 'Content-Type: application/json' -d @teams_message.json ${env.TEAMS_WEBHOOK_URL}"
-                    echo "Notificación enviada a Teams"
+                    echo "Ticket ${params.TICKET_JIRA} cambiado a estado Finalizado"
+                    env.TICKET_FINALIZADO = "true"
+                } else {
+                    echo "No se puede finalizar el ticket automáticamente. Estado actual: ${estadoActual}"
+                    env.TICKET_FINALIZADO = "false"
                 }
+
+                // Notificar a Teams
+                def mensajeTeams = """
+                {
+                    "@type": "MessageCard",
+                    "@context": "https://schema.org/extensions",
+                    "summary": "Actualización de ticket Jira",
+                    "themeColor": "${env.TICKET_FINALIZADO == 'true' ? '00FF00' : 'FF0000'}",
+                    "title": "Ticket Jira: ${params.TICKET_JIRA}",
+                    "text": "**Estado anterior:** ${estadoActual}\\n**Ticket finalizado automáticamente:** ${env.TICKET_FINALIZADO}"
+                }
+                """
+                writeFile file: 'teams_ticket.json', text: mensajeTeams
+                sh "curl -H 'Content-Type: application/json' -d @teams_ticket.json ${env.TEAMS_WEBHOOK_URL}"
+                echo "Notificación enviada a Teams sobre ticket Jira"
             }
         }
     }
+}
 
     post {
         success { echo "Pipeline ejecutado exitosamente" }
