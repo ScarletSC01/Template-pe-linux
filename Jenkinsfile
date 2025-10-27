@@ -11,6 +11,7 @@ pipeline {
         LABEL = 'vm-template'
         ENABLE_STARTUP_SCRIPT = 'true'
         JIRA_API_URL = "https://bancoripley1.atlassian.net/rest/api/3/issue/"
+        JIRA_TRANSITIONS_URL = "https://bancoripley1.atlassian.net/rest/api/3/issue/AJI-83/transitions"
         TEAMS_WEBHOOK = "https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR-A1"
     }
 
@@ -25,7 +26,6 @@ pipeline {
         string(name: 'REGION', defaultValue: 'us-central1', description: 'Región')
         string(name: 'ZONE', defaultValue: 'us-central1-a', description: 'Zona')
         choice(name: 'ENVIRONMENT', choices: ['desarrollo-1', 'pre-productivo-2', 'produccion-3'], description: 'Ambiente')
-
         string(name: 'VM_NAME', defaultValue: 'vm-pe-linux', description: 'Nombre VM')
         choice(name: 'PROCESSOR_TECH', choices: ['n2', 'e2'], description: 'Procesador')
         choice(name: 'VM_TYPE', choices: ['n2-standard', 'e2-standard'], description: 'Tipo VM')
@@ -35,14 +35,12 @@ pipeline {
         string(name: 'DISK_SIZE', defaultValue: '100', description: 'Disco GB')
         choice(name: 'DISK_TYPE', choices: ['pd-ssd', 'pd-balanced', 'pd-standard'], description: 'Tipo disco')
         choice(name: 'INFRAESTRUCTURE_TYPE', choices: ['On-demand', 'Preemptible'], description: 'Infraestructura')
-
         string(name: 'VPC_NETWORK', defaultValue: 'vpc-pe-01', description: 'VPC')
         string(name: 'SUBNET', defaultValue: 'subnet-pe-01', description: 'Subred')
         string(name: 'NETWORK_SEGMENT', defaultValue: '10.0.1.0/24', description: 'Segmento red')
         string(name: 'INTERFACE', defaultValue: 'nic0', description: 'Interfaz')
         choice(name: 'PRIVATE_IP', choices: ['true', 'false'], description: 'IP Privada')
         choice(name: 'PUBLIC_IP', choices: ['false', 'true'], description: 'IP Pública')
-
         string(name: 'FIREWALL_RULES', defaultValue: 'allow-ssh', description: 'Firewall')
         string(name: 'SERVICE_ACCOUNT', defaultValue: 'sa-plataforma@jenkins-terraform-demo-472920.iam.gserviceaccount.com', description: 'Cuenta Servicio')
         string(name: 'LABEL', defaultValue: 'app=demo', description: 'Label')
@@ -50,8 +48,7 @@ pipeline {
         choice(name: 'ENABLE_DELETION_PROTECTION', choices: ['false', 'true'], description: 'Protección eliminación')
         choice(name: 'CHECK_DELETE', choices: ['false', 'true'], description: 'Confirmación borrado')
         choice(name: 'AUTO_DELETE_DISK', choices: ['true', 'false'], description: 'Auto delete disk')
-
-        string(name: 'TICKET_JIRA', defaultValue: 'AJI-83', description: 'Ticket Jira')
+        string(name: 'TICKET_JIRA', defaultValue: 'AJI-1', description: 'Ticket Jira')
     }
 
     stages {
@@ -70,7 +67,9 @@ pipeline {
                     echo "ENABLE_STARTUP_SCRIPT: ${env.ENABLE_STARTUP_SCRIPT}"
 
                     echo "================== Variables Visibles =================="
-                    params.each { key, value -> echo "${key}: ${value}" }
+                    params.each { key, value ->
+                        echo "${key}: ${value}"
+                    }
                 }
             }
         }
@@ -93,7 +92,7 @@ pipeline {
             steps {
                 script {
                     echo "================================================"
-                    echo "              RESUMEN DE CONFIGURACIÓN          "
+                    echo " RESUMEN DE CONFIGURACIÓN "
                     echo "================================================"
                     echo "Sistema Operativo Base: ${env.SISTEMA_OPERATIVO_BASE}"
                     echo "Tipo de Procesador: ${params.PROCESSOR_TECH}"
@@ -104,78 +103,84 @@ pipeline {
             }
         }
 
+        /* === BLOQUES TERRAFORM COMENTADOS ===
+        stage('Terraform Init & Plan') { ... }
+        stage('Terraform Apply') { ... }
+        stage('Terraform Destroy') { ... }
+        */
+
         stage('Validación de Parámetros Jira') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
-
                         def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
-                        def issueKey = params.TICKET_JIRA
-                        def jiraBaseUrl = "${JIRA_API_URL}"
+                        def estadoActual = ""
+                        def mensajeTeams = ""
 
                         echo "==============================================="
-                        echo "  Validando estado del ticket ${issueKey}"
+                        echo " Validando estado del ticket ${params.TICKET_JIRA}"
                         echo "==============================================="
 
                         def response = sh(script: """
-                            curl -s -X GET "${jiraBaseUrl}${issueKey}" \
+                            curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \
                             -H "Authorization: Basic ${auth}" \
                             -H "Accept: application/json"
                         """, returnStdout: true).trim()
 
-                        def issueMap = new groovy.json.JsonSlurperClassic().parseText(response)
-                        def estadoActual = issueMap?.fields?.status?.name?.toString() ?: "Desconocido"
-
+                        def issueData = new groovy.json.JsonSlurper().parseText(response)
+                        estadoActual = issueData?.fields?.status?.name ?: "Desconocido"
                         echo "Estado actual del ticket: ${estadoActual}"
 
-                        if (estadoActual.toLowerCase() in ["done", "finalizado", "cerrado", "closed"]) {
-                            error("El ticket ${issueKey} ya está en estado '${estadoActual}'. No se puede continuar.")
+                        if (estadoActual.toLowerCase() in ["done", "finalizado", "closed", "cerrado"]) {
+                            mensajeTeams = "Error: El ticket ${params.TICKET_JIRA} ya se encuentra en estado '${estadoActual}'. Ejecución detenida."
+                            writeFile file: 'teams_error.json', text: groovy.json.JsonOutput.toJson([text: mensajeTeams])
+                            sh "curl -H 'Content-Type: application/json' -d @teams_error.json ${TEAMS_WEBHOOK}"
+                            error(mensajeTeams)
                         }
 
-                        if (estadoActual.toLowerCase() == "en curso" || estadoActual.toLowerCase() == "in progress") {
-                            echo "Buscando transición hacia 'Finalizado'..."
-
+                        if (estadoActual.toLowerCase() == "en curso") {
+                            echo "El ticket está en curso. Procediendo a cerrarlo automáticamente..."
                             def transitionsResp = sh(script: """
-                                curl -s -X GET "${jiraBaseUrl}${issueKey}/transitions" \
+                                curl -s -X GET "${JIRA_TRANSITIONS_URL}" \
                                 -H "Authorization: Basic ${auth}" \
                                 -H "Accept: application/json"
                             """, returnStdout: true).trim()
 
-                            def transitionsMap = new groovy.json.JsonSlurperClassic().parseText(transitionsResp)
-                            def transitionId = null
-
-                            if (transitionsMap?.transitions) {
-                                for (t in transitionsMap.transitions) {
-                                    def name = t?.name?.toString()?.toLowerCase()
-                                    if (name.contains("finalizado") || name.contains("done") || name.contains("cerrado")) {
-                                        transitionId = t.id?.toString()
-                                        break
-                                    }
-                                }
+                            def transitions = new groovy.json.JsonSlurper().parseText(transitionsResp)
+                            def finalizadoTransition = transitions?.transitions?.find {
+                                it.name.toLowerCase().contains("finalizado") || it.name.toLowerCase().contains("done")
                             }
 
-                            if (transitionId) {
-                                echo "Transición encontrada: id=${transitionId}. Ejecutando cambio..."
+                            if (finalizadoTransition) {
                                 sh """
-                                    curl -s -X POST "${jiraBaseUrl}${issueKey}/transitions" \
+                                    curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \
                                     -H "Authorization: Basic ${auth}" \
                                     -H "Content-Type: application/json" \
-                                    -d '{ "transition": { "id": "${transitionId}" } }'
+                                    -d '{ "transition": { "id": "${finalizadoTransition.id}" } }'
                                 """
-                                echo "Ticket ${issueKey} movido a 'Finalizado'."
-
-                                def msgMap = [ text: "Ticket ${issueKey} pasó de 'En curso' a 'Finalizado' automáticamente." ]
-                                def msgJson = groovy.json.JsonOutput.toJson(msgMap)
-                                writeFile file: 'teams_message.json', text: msgJson
+                                echo "Ticket ${params.TICKET_JIRA} movido a estado 'Finalizado'."
+                                mensajeTeams = "Ticket ${params.TICKET_JIRA} pasó automáticamente de 'En curso' a 'Finalizado'."
+                                writeFile file: 'teams_message.json', text: groovy.json.JsonOutput.toJson([text: mensajeTeams])
                                 sh "curl -H 'Content-Type: application/json' -d @teams_message.json ${TEAMS_WEBHOOK}"
-                                echo "Notificación enviada a Teams."
                             } else {
-                                error("No se encontró transición válida a 'Finalizado' para el ticket ${issueKey}.")
+                                error("No se encontró transición válida a 'Finalizado' para el ticket ${params.TICKET_JIRA}.")
                             }
                         } else {
-                            echo "El ticket ${issueKey} está en estado '${estadoActual}'. Continuando..."
+                            mensajeTeams = "El ticket ${params.TICKET_JIRA} tiene estado '${estadoActual}'. Continuando ejecución."
+                            writeFile file: 'teams_info.json', text: groovy.json.JsonOutput.toJson([text: mensajeTeams])
+                            sh "curl -H 'Content-Type: application/json' -d @teams_info.json ${TEAMS_WEBHOOK}"
                         }
                     }
+                }
+            }
+        }
+
+        stage('Notificación Teams (Jira)') {
+            steps {
+                script {
+                    def msg = groovy.json.JsonOutput.toJson([text: "Pipeline finalizó correctamente. Ticket ${params.TICKET_JIRA} validado y actualizado."])
+                    writeFile file: 'teams_final.json', text: msg
+                    sh "curl -H 'Content-Type: application/json' -d @teams_final.json ${TEAMS_WEBHOOK}"
                 }
             }
         }
@@ -190,8 +195,8 @@ pipeline {
         }
         always {
             echo "================================================"
-            echo "            FIN DE LA EJECUCIÓN                "
-            echo "  Fecha: ${new Date()}"
+            echo " FIN DE LA EJECUCIÓN "
+            echo " Fecha: ${new Date()}"
             echo "================================================"
         }
     }
