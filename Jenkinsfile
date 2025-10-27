@@ -1,3 +1,6 @@
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+
 pipeline {
     agent any
 
@@ -65,10 +68,17 @@ pipeline {
                     echo "ENABLE_STARTUP_SCRIPT: ${env.ENABLE_STARTUP_SCRIPT}"
 
                     echo "================== Variables Visibles =================="
-                    params.each { k,v -> echo "${k}: ${v}" }
+                    params.each { k, v -> echo "${k}: ${v}" }
                 }
             }
         }
+
+        // --- BLOQUES TERRAFORM COMENTADOS ---
+        /*
+        stage('Terraform Init & Plan') { steps { ... } }
+        stage('Terraform Apply') { steps { ... } }
+        stage('Terraform Destroy') { steps { ... } }
+        */
 
         stage('Jira: Validación y Transición') {
             steps {
@@ -79,19 +89,18 @@ pipeline {
 
                         // Consulta estado del ticket
                         def response = sh(script: """curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" -H "Authorization: Basic ${auth}" -H "Accept: application/json" """, returnStdout: true).trim()
-                        
-                        // Convertir a JSON String para evitar NotSerializableException
-                        def ticketJsonStr = new groovy.json.JsonOutput.toJson(new groovy.json.JsonSlurper().parseText(response))
+                        def ticketJson = new JsonSlurper().parseText(response)
+                        def estado = ticketJson.fields.status.name.toString()
+                        echo "Estado actual del ticket ${params.TICKET_JIRA}: ${estado}"
+                        def ticketJsonStr = JsonOutput.toJson(ticketJson)
                         echo "Ticket JSON: ${ticketJsonStr}"
 
-                        def ticketMap = new groovy.json.JsonSlurper().parseText(ticketJsonStr)
-                        def estado = ticketMap.fields.status.name.toString()
-                        echo "Estado actual del ticket ${params.TICKET_JIRA}: ${estado}"
-
+                        // Si está "En curso", ejecutar transición a finalizado
                         if (estado.toLowerCase() == "en curso") {
                             def transResponse = sh(script: """curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" -H "Authorization: Basic ${auth}" -H "Accept: application/json" """, returnStdout: true).trim()
-                            def transitionsJsonStr = new groovy.json.JsonOutput.toJson(new groovy.json.JsonSlurper().parseText(transResponse))
-                            def transitions = new groovy.json.JsonSlurper().parseText(transitionsJsonStr)
+                            def transitions = new JsonSlurper().parseText(transResponse)
+                            def transitionsJsonStr = JsonOutput.toJson(transitions)
+                            echo "Transiciones disponibles: ${transitionsJsonStr}"
 
                             def transitionId = transitions.transitions.find { it.name.toLowerCase().contains("finalizado") }?.id
                             if (transitionId) {
@@ -130,3 +139,4 @@ pipeline {
         }
     }
 }
+
