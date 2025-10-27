@@ -1,9 +1,3 @@
-// ===== Función parseJson fuera del pipeline =====
-@NonCPS
-def parseJson(String jsonText) {
-    return new groovy.json.JsonSlurper().parseText(jsonText)
-}
-
 pipeline {
     agent any
 
@@ -71,43 +65,10 @@ pipeline {
                     echo "ENABLE_STARTUP_SCRIPT: ${env.ENABLE_STARTUP_SCRIPT}"
 
                     echo "================== Variables Visibles =================="
-                    echo "PROYECT_ID: ${params.PROYECT_ID}"
-                    echo "REGION: ${params.REGION}"
-                    echo "ZONE: ${params.ZONE}"
-                    echo "ENVIRONMENT: ${params.ENVIRONMENT}"
-                    echo "VM_NAME: ${params.VM_NAME}"
-                    echo "PROCESSOR_TECH: ${params.PROCESSOR_TECH}"
-                    echo "VM_TYPE: ${params.VM_TYPE}"
-                    echo "VM_CORES: ${params.VM_CORES}"
-                    echo "VM_MEMORY: ${params.VM_MEMORY}"
-                    echo "OS_TYPE: ${params.OS_TYPE}"
-                    echo "DISK_SIZE: ${params.DISK_SIZE}"
-                    echo "DISK_TYPE: ${params.DISK_TYPE}"
-                    echo "INFRAESTRUCTURE_TYPE: ${params.INFRAESTRUCTURE_TYPE}"
-                    echo "VPC_NETWORK: ${params.VPC_NETWORK}"
-                    echo "SUBNET: ${params.SUBNET}"
-                    echo "NETWORK_SEGMENT: ${params.NETWORK_SEGMENT}"
-                    echo "INTERFACE: ${params.INTERFACE}"
-                    echo "PRIVATE_IP: ${params.PRIVATE_IP}"
-                    echo "PUBLIC_IP: ${params.PUBLIC_IP}"
-                    echo "FIREWALL_RULES: ${params.FIREWALL_RULES}"
-                    echo "SERVICE_ACCOUNT: ${params.SERVICE_ACCOUNT}"
-                    echo "LABEL: ${params.LABEL}"
-                    echo "ENABLE_STARTUP_SCRIPT: ${params.ENABLE_STARTUP_SCRIPT}"
-                    echo "ENABLE_DELETION_PROTECTION: ${params.ENABLE_DELETION_PROTECTION}"
-                    echo "CHECK_DELETE: ${params.CHECK_DELETE}"
-                    echo "AUTO_DELETE_DISK: ${params.AUTO_DELETE_DISK}"
-                    echo "TICKET_JIRA: ${params.TICKET_JIRA}"
+                    params.each { k,v -> echo "${k}: ${v}" }
                 }
             }
         }
-
-        // --- BLOQUES TERRAFORM COMENTADOS ---
-        /*
-        stage('Terraform Init & Plan') { steps { ... } }
-        stage('Terraform Apply') { steps { ... } }
-        stage('Terraform Destroy') { steps { ... } }
-        */
 
         stage('Jira: Validación y Transición') {
             steps {
@@ -118,14 +79,20 @@ pipeline {
 
                         // Consulta estado del ticket
                         def response = sh(script: """curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" -H "Authorization: Basic ${auth}" -H "Accept: application/json" """, returnStdout: true).trim()
-                        def ticketJson = parseJson(response)
-                        def estado = ticketJson.fields.status.name.toString()
+                        
+                        // Convertir a JSON String para evitar NotSerializableException
+                        def ticketJsonStr = new groovy.json.JsonOutput.toJson(new groovy.json.JsonSlurper().parseText(response))
+                        echo "Ticket JSON: ${ticketJsonStr}"
+
+                        def ticketMap = new groovy.json.JsonSlurper().parseText(ticketJsonStr)
+                        def estado = ticketMap.fields.status.name.toString()
                         echo "Estado actual del ticket ${params.TICKET_JIRA}: ${estado}"
 
-                        // Si está "En curso", ejecutar transición a finalizado
                         if (estado.toLowerCase() == "en curso") {
                             def transResponse = sh(script: """curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" -H "Authorization: Basic ${auth}" -H "Accept: application/json" """, returnStdout: true).trim()
-                            def transitions = parseJson(transResponse)
+                            def transitionsJsonStr = new groovy.json.JsonOutput.toJson(new groovy.json.JsonSlurper().parseText(transResponse))
+                            def transitions = new groovy.json.JsonSlurper().parseText(transitionsJsonStr)
+
                             def transitionId = transitions.transitions.find { it.name.toLowerCase().contains("finalizado") }?.id
                             if (transitionId) {
                                 sh """curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \\
