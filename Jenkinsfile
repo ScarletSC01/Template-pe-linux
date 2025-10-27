@@ -11,6 +11,7 @@ pipeline {
         LABEL = 'vm-template'
         ENABLE_STARTUP_SCRIPT = 'true'
         JIRA_API_URL = "https://bancoripley1.atlassian.net/rest/api/3/issue/"
+        TEAMS_WEBHOOK_URL = "https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR"
     }
 
     options {
@@ -20,131 +21,158 @@ pipeline {
     }
 
     parameters {
-        string(name: 'PROYECT_ID', defaultValue: '', description: 'ID del proyecto en GCP')
-        string(name: 'REGION', defaultValue: 'us-central1', description: 'Región')
-        string(name: 'ZONE', defaultValue: 'us-central1-a', description: 'Zona')
-        choice(name: 'ENVIRONMENT', choices: ['desarrollo-1', 'pre-productivo-2', 'produccion-3'], description: 'Ambiente')
-        string(name: 'VM_NAME', defaultValue: 'vm-cl-linux', description: 'Nombre VM')
-        choice(name: 'PROCESSOR_TECH', choices: ['n2', 'e2'], description: 'Procesador')
-        choice(name: 'VM_TYPE', choices: ['n2-standard', 'e2-standard'], description: 'Tipo VM')
-        string(name: 'VM_CORES', defaultValue: '2', description: 'vCPUs')
-        string(name: 'VM_MEMORY', defaultValue: '8', description: 'RAM GB')
-        choice(name: 'OS_TYPE', choices: ['linux-ubuntu-22', 'linux-ubuntu-20', 'linux-debian-12'], description: 'OS')
-        string(name: 'DISK_SIZE', defaultValue: '100', description: 'Tamaño disco GB')
-        choice(name: 'DISK_TYPE', choices: ['pd-ssd', 'pd-balanced', 'pd-standard'], description: 'Tipo disco')
-        choice(name: 'INFRAESTRUCTURE_TYPE', choices: ['On-demand', 'Preemptible'], description: 'Infraestructura')
-        string(name: 'VPC_NETWORK', defaultValue: 'vpc-cl-01', description: 'VPC')
-        string(name: 'SUBNET', defaultValue: 'subnet-cl-01', description: 'Subred')
-        string(name: 'NETWORK_SEGMENT', defaultValue: '10.0.1.0/24', description: 'Segmento red')
-        string(name: 'INTERFACE', defaultValue: 'nic0', description: 'Interfaz')
-        choice(name: 'PRIVATE_IP', choices: ['true', 'false'], description: 'IP Privada')
-        choice(name: 'PUBLIC_IP', choices: ['false', 'true'], description: 'IP Pública')
-        string(name: 'FIREWALL_RULES', defaultValue: 'allow-ssh', description: 'Firewall')
-        string(name: 'SERVICE_ACCOUNT', defaultValue: 'sa-plataforma@jenkins-terraform-demo-472920.iam.gserviceaccount.com', description: 'Cuenta Servicio')
-        choice(name: 'ENABLE_DELETION_PROTECTION', choices: ['false', 'true'], description: 'Protección eliminación')
-        choice(name: 'CHECK_DELETE', choices: ['false', 'true'], description: 'Confirmación borrado')
-        choice(name: 'AUTO_DELETE_DISK', choices: ['true', 'false'], description: 'Auto delete disk')
-        string(name: 'TICKET_JIRA', defaultValue: 'AJI-83', description: 'Ticket Jira')
+        string(name: 'PROYECT_ID', defaultValue: '', description: 'ID del proyecto en Google Cloud Platform')
+        string(name: 'REGION', defaultValue: 'us-central1', description: 'Región de GCP donde se desplegará la VM')
+        string(name: 'ZONE', defaultValue: 'us-central1-a', description: 'Zona de disponibilidad específica')
+        choice(name: 'ENVIRONMENT', choices: ['desarrollo-1', 'pre-productivo-2', 'produccion-3'], description: 'Ambiente de despliegue de la infraestructura')
+        string(name: 'VM_NAME', defaultValue: 'vm-pe-linux', description: 'Nombre único para la máquina virtual')
+        choice(name: 'PROCESSOR_TECH', choices: ['n2', 'e2'], description: 'Tecnología de procesador')
+        choice(name: 'VM_TYPE', choices: ['n2-standard', 'e2-standard'], description: 'Familia de tipo de máquina virtual')
+        string(name: 'VM_CORES', defaultValue: '2', description: 'Número de vCPUs para la máquina virtual')
+        string(name: 'VM_MEMORY', defaultValue: '8', description: 'Memoria RAM en GB')
+        choice(name: 'OS_TYPE', choices: ['linux-ubuntu-22', 'linux-ubuntu-20', 'linux-debian-12'], description: 'Versión del sistema operativo')
+        string(name: 'DISK_SIZE', defaultValue: '100', description: 'Tamaño del disco persistente en GB')
+        choice(name: 'DISK_TYPE', choices: ['pd-ssd', 'pd-balanced', 'pd-standard'], description: 'Tipo de disco')
+        choice(name: 'INFRAESTRUCTURE_TYPE', choices: ['On-demand', 'Preemptible'], description: 'Tipo de infraestructura')
+        string(name: 'VPC_NETWORK', defaultValue: 'vpc-pe-01', description: 'Nombre de la red VPC')
+        string(name: 'SUBNET', defaultValue: 'subnet-pe-01', description: 'Nombre de la subred')
+        string(name: 'NETWORK_SEGMENT', defaultValue: '10.0.1.0/24', description: 'Segmento de red CIDR')
+        string(name: 'INTERFACE', defaultValue: 'nic0', description: 'Nombre de la interfaz de red principal')
+        choice(name: 'PRIVATE_IP', choices: ['true', 'false'], description: 'Asignar IP privada estática')
+        choice(name: 'PUBLIC_IP', choices: ['false', 'true'], description: 'Asignar IP pública externa')
+        string(name: 'FIREWALL_RULES', defaultValue: 'allow-ssh', description: 'Reglas de firewall separadas por comas')
+        string(name: 'SERVICE_ACCOUNT', defaultValue: 'sa-plataforma@jenkins-terraform-demo-472920.iam.gserviceaccount.com', description: 'Cuenta de servicio para la VM')
+        string(name: 'LABEL', defaultValue: '', description: 'Etiquetas personalizadas para la VM')
+        choice(name: 'ENABLE_STARTUP_SCRIPT', choices: ['false', 'true'], description: 'Habilitar script de inicio personalizado')
+        choice(name: 'ENABLE_DELETION_PROTECTION', choices: ['false', 'true'], description: 'Proteger la VM contra eliminación accidental')
+        choice(name: 'CHECK_DELETE', choices: ['false', 'true'], description: 'Solicitar confirmación antes de eliminar recursos')
+        choice(name: 'AUTO_DELETE_DISK', choices: ['true', 'false'], description: 'Eliminar automáticamente el disco al eliminar la VM')
+        string(name: 'TICKET_JIRA', defaultValue: 'AJI-1', description: 'Ticket de Jira a consultar y comentar')
     }
 
     stages {
-
-        stage('Validación de Parámetros') {
+        stage('Mostrar Variables Ocultas y Visibles') {
             steps {
                 script {
-                    echo "================================================"
-                    echo "         VALIDACIÓN DE PARÁMETROS              "
-                    echo "================================================"
+                    echo "================== Variables Ocultas =================="
+                    echo "PAIS: ${env.PAIS}"
+                    echo "SISTEMA_OPERATIVO_BASE: ${env.SISTEMA_OPERATIVO_BASE}"
+                    echo "SNAPSHOT_ENABLED: ${env.SNAPSHOT_ENABLED}"
+                    echo "SNAPSHOT_VM: ${env.SNAPSHOT_VM}"
+                    echo "SNAPSHOT_SO: ${env.SNAPSHOT_SO}"
+                    echo "SNAPSHOT_DISK: ${env.SNAPSHOT_DISK}"
+                    echo "LABEL: ${env.LABEL}"
+                    echo "ENABLE_STARTUP_SCRIPT: ${env.ENABLE_STARTUP_SCRIPT}"
 
-                    def errores = []
-                    if (!params.SUBNET?.trim()) errores.add("SUBNET no puede estar vacío")
-                    if (!params.NETWORK_SEGMENT?.trim()) errores.add("NETWORK_SEGMENT no puede estar vacío")
-
-                    if (errores.size() > 0) {
-                        errores.each { echo "  - ${it}" }
-                        error("Validación fallida")
-                    }
-                    echo "Validación completada correctamente"
+                    echo "================== Variables Visibles =================="
+                    echo "PROYECT_ID: ${params.PROYECT_ID}"
+                    echo "REGION: ${params.REGION}"
+                    echo "ZONE: ${params.ZONE}"
+                    echo "ENVIRONMENT: ${params.ENVIRONMENT}"
+                    echo "VM_NAME: ${params.VM_NAME}"
+                    echo "PROCESSOR_TECH: ${params.PROCESSOR_TECH}"
+                    echo "VM_TYPE: ${params.VM_TYPE}"
+                    echo "VM_CORES: ${params.VM_CORES}"
+                    echo "VM_MEMORY: ${params.VM_MEMORY}"
+                    echo "OS_TYPE: ${params.OS_TYPE}"
+                    echo "DISK_SIZE: ${params.DISK_SIZE}"
+                    echo "DISK_TYPE: ${params.DISK_TYPE}"
+                    echo "INFRAESTRUCTURE_TYPE: ${params.INFRAESTRUCTURE_TYPE}"
+                    echo "VPC_NETWORK: ${params.VPC_NETWORK}"
+                    echo "SUBNET: ${params.SUBNET}"
+                    echo "NETWORK_SEGMENT: ${params.NETWORK_SEGMENT}"
+                    echo "INTERFACE: ${params.INTERFACE}"
+                    echo "PRIVATE_IP: ${params.PRIVATE_IP}"
+                    echo "PUBLIC_IP: ${params.PUBLIC_IP}"
+                    echo "FIREWALL_RULES: ${params.FIREWALL_RULES}"
+                    echo "SERVICE_ACCOUNT: ${params.SERVICE_ACCOUNT}"
+                    echo "LABEL: ${params.LABEL}"
+                    echo "ENABLE_STARTUP_SCRIPT: ${params.ENABLE_STARTUP_SCRIPT}"
+                    echo "ENABLE_DELETION_PROTECTION: ${params.ENABLE_DELETION_PROTECTION}"
+                    echo "CHECK_DELETE: ${params.CHECK_DELETE}"
+                    echo "AUTO_DELETE_DISK: ${params.AUTO_DELETE_DISK}"
+                    echo "TICKET_JIRA: ${params.TICKET_JIRA}"
                 }
             }
         }
 
-        stage('Mostrar Variables') {
+        // BLOQUES TERRAFORM COMENTADOS
+        /*
+        stage('Terraform Init & Plan') { ... }
+        stage('Terraform Apply') { ... }
+        stage('Terraform Destroy') { ... }
+        */
+
+        stage('Post-Jira Status') {
             steps {
                 script {
-                    echo "================================================"
-                    echo "           VARIABLES OCULTAS                    "
-                    echo "================================================"
-                    echo "PAIS: ${PAIS}"
-                    echo "SISTEMA_OPERATIVO_BASE: ${SISTEMA_OPERATIVO_BASE}"
-                    echo "SNAPSHOT_ENABLED: ${SNAPSHOT_ENABLED}"
-                    echo "SNAPSHOT_VM: ${SNAPSHOT_VM}"
-                    echo "SNAPSHOT_SO: ${SNAPSHOT_SO}"
-                    echo "SNAPSHOT_DISK: ${SNAPSHOT_DISK}"
-                    echo "LABEL: ${LABEL}"
-                    echo "ENABLE_STARTUP_SCRIPT: ${ENABLE_STARTUP_SCRIPT}"
-
-                    echo "================================================"
-                    echo "        VARIABLES Y PARÁMETROS DEL PIPELINE     "
-                    echo "================================================"
-
-                    def paramOrder = [
-                        'SERVICE_ACCOUNT','CHECK_DELETE','FIREWALL_RULES','ZONE','DISK_SIZE','NETWORK_SEGMENT',
-                        'ENABLE_STARTUP_SCRIPT','ENVIRONMENT','PROYECT_ID','VM_NAME','PROCESSOR_TECH','INTERFACE',
-                        'AUTO_DELETE_DISK','LABEL','VM_CORES','PRIVATE_IP','VM_TYPE','ENABLE_DELETION_PROTECTION',
-                        'TICKET_JIRA','OS_TYPE','PUBLIC_IP','INFRAESTRUCTURE_TYPE','REGION','SUBNET','VM_MEMORY',
-                        'VPC_NETWORK','DISK_TYPE'
-                    ]
-                    paramOrder.each { p ->
-                        echo "${p}: ${params.get(p)}"
+                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
+                        def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
+                        def response = sh(
+                            script: """
+                                curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \\
+                                -H "Authorization: Basic ${auth}" \\
+                                -H "Accept: application/json"
+                            """,
+                            returnStdout: true
+                        ).trim()
+                        def json = new groovy.json.JsonSlurper().parseText(response)
+                        def estado = json.fields.status.name
+                        echo "Estado actual del ticket ${params.TICKET_JIRA}: ${estado}"
                     }
                 }
             }
         }
 
-stage('Gestionar Jira y Teams') {
-    steps {
-        script {
-            withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
-
-                // Escribir credenciales sin interpolación insegura
-                writeFile file: 'jira_auth.txt', text: JIRA_USER + ':' + JIRA_API_TOKEN
-
-                def issueResponse = sh(script: "curl -s -u \$(cat jira_auth.txt) -X GET ${JIRA_API_URL}${params.TICKET_JIRA} -H 'Accept: application/json'", returnStdout: true).trim()
-
-                // Usar matcher seguro
-                def matcher = issueResponse =~ /"name"\s*:\s*"([^"]+)"/
-                def status = matcher.find() ? matcher[0][1] : 'Desconocido'
-                matcher = null // evitar problemas de serialización
-
-                if (status != 'Finalizada') {
-                    echo "Estado actual del ticket ${params.TICKET_JIRA}: ${status}"
-                    echo "Cambiando estado a 'Finalizado'..."
-                    sh "curl -s -u \$(cat jira_auth.txt) -X POST ${JIRA_API_URL}${params.TICKET_JIRA}/transitions -H 'Content-Type: application/json' -d '{\"transition\": {\"id\": \"31\"}}'"
-                    echo "Ticket actualizado a Finalizado."
-                } else {
-                    echo "El ticket ya está en estado Finalizado."
+        stage('Post-Coment-jira') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
+                        def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
+                        def comentario = "Este ticket fue comentado por Scarlet SC"
+                        sh(script: """
+                            curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" \\
+                            -H "Authorization: Basic ${auth}" \\
+                            -H "Content-Type: application/json" \\
+                            -d '{
+                                "body": {
+                                    "type": "doc",
+                                    "version": 1,
+                                    "content": [
+                                        { "type": "paragraph", "content": [ { "type": "text", "text": "${comentario}" } ] }
+                                    ]
+                                }
+                            }'
+                        """)
+                        echo "Comentario enviado al ticket ${params.TICKET_JIRA}"
+                    }
                 }
+            }
+        }
 
-                def teamsMessage = [
-                    title: "Pipeline ejecutado correctamente",
-                    text: """Detalles de la VM:
-Instancia: ${params.VM_NAME}
-Ambiente: ${params.ENVIRONMENT}
-Proyecto: ${params.PROYECT_ID}
-Región: ${params.REGION}
-Fecha: ${new Date()}
-Build URL: ${env.BUILD_URL}"""
-                ]
-
-                sh "curl -H 'Content-Type: application/json' -d '${groovy.json.JsonOutput.toJson(teamsMessage)}' -X POST https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR-A1"
+        stage('Notificación Teams') {
+            steps {
+                script {
+                    writeFile file: 'teams_message.json', text: """
+                    {
+                        "@type": "MessageCard",
+                        "@context": "https://schema.org/extensions",
+                        "summary": "Ejecución de Pipeline completada",
+                        "themeColor": "0078D7",
+                        "title": "Pipeline Jenkins - ${env.PAIS}",
+                        "text": "**VM:** ${params.VM_NAME} (${params.OS_TYPE})\\n**Acción:** Despliegue\\n**Ticket Jira:** ${params.TICKET_JIRA}"
+                    }
+                    """
+                    sh "curl -H 'Content-Type: application/json' -d @teams_message.json ${env.TEAMS_WEBHOOK_URL}"
+                    echo "Notificación enviada a Teams"
+                }
             }
         }
     }
-}
-
 
     post {
+        success { echo "Pipeline ejecutado exitosamente" }
+        failure { echo "Pipeline falló durante la ejecución" }
         always {
             echo "================================================"
             echo "            FIN DE LA EJECUCIÓN                "
