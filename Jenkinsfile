@@ -112,64 +112,69 @@ pipeline {
         stage('Terraform Destroy') { ... }
         */
 
-        stage('Jira: Validar y Finalizar Ticket') {
+        stage('Validación de Parámetros Jira') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
                         def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
 
-                        // Obtener estado
+                        echo "==============================================="
+                        echo "   Validando estado del ticket ${params.TICKET_JIRA}"
+                        echo "==============================================="
+
+                        // --- Consultar estado actual ---
                         def response = sh(script: """
-                            curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \\
-                            -H "Authorization: Basic ${auth}" \\
+                            curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \
+                            -H "Authorization: Basic ${auth}" \
                             -H "Accept: application/json"
                         """, returnStdout: true).trim()
 
-                        def estado = new groovy.json.JsonSlurper().parseText(response)?.fields?.status?.name
-                        echo "Estado actual del ticket ${params.TICKET_JIRA}: ${estado}"
+                        def issueData = new groovy.json.JsonSlurper().parseText(response)
+                        def estadoActual = issueData?.fields?.status?.name ?: "Desconocido"
 
-                        def transitionMessage = ""
+                        echo "Estado actual del ticket: ${estadoActual}"
 
-                        if (estado?.toLowerCase() == "en curso") {
+                        // --- Validar si ya está finalizado ---
+                        if (estadoActual.toLowerCase() in ["done", "finalizado", "closed", "cerrado"]) {
+                            error("El ticket ${params.TICKET_JIRA} ya está en estado '${estadoActual}'. No se puede continuar con la ejecución.")
+                        }
+
+                        // --- Si está en curso, pasarlo automáticamente a finalizado ---
+                        if (estadoActual.toLowerCase() == "en curso") {
+                            echo "El ticket está en curso. Procediendo a cerrarlo automáticamente..."
+
                             def transitionsResp = sh(script: """
-                                curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \\
-                                -H "Authorization: Basic ${auth}" \\
+                                curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \
+                                -H "Authorization: Basic ${auth}" \
                                 -H "Accept: application/json"
                             """, returnStdout: true).trim()
 
-                            def finalizadoId = new groovy.json.JsonSlurper().parseText(transitionsResp)
-                                                ?.transitions?.find { it.name.toLowerCase().contains("finalizado") }?.id
+                            def transitions = new groovy.json.JsonSlurper().parseText(transitionsResp)
+                            def finalizadoTransition = transitions?.transitions?.find { it.name.toLowerCase().contains("finalizado") || it.name.toLowerCase().contains("done") }
 
-                            if(finalizadoId) {
+                            if (finalizadoTransition) {
                                 sh """
-                                    curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \\
-                                    -H "Authorization: Basic ${auth}" \\
-                                    -H "Content-Type: application/json" \\
-                                    -d '{ "transition": { "id": "${finalizadoId}" } }'
+                                    curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \
+                                    -H "Authorization: Basic ${auth}" \
+                                    -H "Content-Type: application/json" \
+                                    -d '{ "transition": { "id": "${finalizadoTransition.id}" } }'
                                 """
-                                transitionMessage = "Ticket ${params.TICKET_JIRA} pasó a Finalizado automáticamente."
-                                estado = "Finalizado"
+                                echo "Ticket ${params.TICKET_JIRA} movido a estado 'Finalizado'."
+                                def msg = groovy.json.JsonOutput.toJson([text: "Ticket ${params.TICKET_JIRA} pasó de 'En curso' a 'Finalizado' automáticamente."])
+                                writeFile file: 'teams_message.json', text: msg
+                                sh "curl -H 'Content-Type: application/json' -d @teams_message.json ${TEAMS_WEBHOOK}"
                             } else {
-                                transitionMessage = "No se encontró transición a 'Finalizado'."
+                                error(" No se encontró transición válida a 'Finalizado' para el ticket ${params.TICKET_JIRA}.")
                             }
                         } else {
-                            transitionMessage = "Ticket ${params.TICKET_JIRA} no estaba 'En curso', no se realizó transición."
+                            echo "El ticket ${params.TICKET_JIRA} no está en curso ni finalizado (estado: ${estadoActual}). Continuando..."
                         }
-
-                        // Notificación Teams
-                        def teamsMsg = groovy.json.JsonOutput.toJson([
-                            text: "Pipeline ejecutado. Ticket ${params.TICKET_JIRA} estado: ${estado}. ${transitionMessage}"
-                        ])
-                        writeFile file: 'teams_message.json', text: teamsMsg
-                        sh "curl -H 'Content-Type: application/json' -d @teams_message.json ${TEAMS_WEBHOOK}"
-                        echo "Notificación enviada a Teams."
                     }
                 }
             }
         }
-    }
 
-    post {
+ post {
         success { echo "Pipeline ejecutado exitosamente" }
         failure { echo "Pipeline falló durante la ejecución" }
         always {
@@ -180,4 +185,3 @@ pipeline {
         }
     }
 }
-
