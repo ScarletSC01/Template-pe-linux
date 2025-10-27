@@ -102,43 +102,47 @@ pipeline {
             }
         }
 
-        stage('Gestionar Jira y Teams') {
-            steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
+stage('Gestionar Jira y Teams') {
+    steps {
+        script {
+            withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
 
-                        writeFile file: 'jira_auth.txt', text: "${JIRA_USER}:${JIRA_API_TOKEN}"
+                // Escribir credenciales sin interpolación insegura
+                writeFile file: 'jira_auth.txt', text: JIRA_USER + ':' + JIRA_API_TOKEN
 
-                        def issueResponse = sh(script: "curl -s -u \$(cat jira_auth.txt) -X GET ${JIRA_API_URL}${params.TICKET_JIRA} -H 'Accept: application/json'", returnStdout: true).trim()
-                        def statusMatch = issueResponse =~ /\"name\"\s*:\s*\"([^\"]+)\"/
-                        def status = statusMatch ? statusMatch[0][1] : 'Desconocido'
+                def issueResponse = sh(script: "curl -s -u \$(cat jira_auth.txt) -X GET ${JIRA_API_URL}${params.TICKET_JIRA} -H 'Accept: application/json'", returnStdout: true).trim()
 
-                        if (status != 'Finalizada') {
-                            echo "Estado actual del ticket ${params.TICKET_JIRA}: ${status}"
-                            echo "Cambiando estado a 'Finalizado'..."
-                            sh "curl -s -u \$(cat jira_auth.txt) -X POST ${JIRA_API_URL}${params.TICKET_JIRA}/transitions -H 'Content-Type: application/json' -d '{\"transition\": {\"id\": \"31\"}}'"
-                            echo "Ticket actualizado a Finalizado."
-                        } else {
-                            echo "El ticket ya está en estado Finalizado."
-                        }
+                // Usar matcher seguro
+                def matcher = issueResponse =~ /"name"\s*:\s*"([^"]+)"/
+                def status = matcher.find() ? matcher[0][1] : 'Desconocido'
+                matcher = null // evitar problemas de serialización
 
-                        def teamsMessage = [
-                            title: "Pipeline ejecutado correctamente",
-                            text: """Detalles de la VM:
+                if (status != 'Finalizada') {
+                    echo "Estado actual del ticket ${params.TICKET_JIRA}: ${status}"
+                    echo "Cambiando estado a 'Finalizado'..."
+                    sh "curl -s -u \$(cat jira_auth.txt) -X POST ${JIRA_API_URL}${params.TICKET_JIRA}/transitions -H 'Content-Type: application/json' -d '{\"transition\": {\"id\": \"31\"}}'"
+                    echo "Ticket actualizado a Finalizado."
+                } else {
+                    echo "El ticket ya está en estado Finalizado."
+                }
+
+                def teamsMessage = [
+                    title: "Pipeline ejecutado correctamente",
+                    text: """Detalles de la VM:
 Instancia: ${params.VM_NAME}
 Ambiente: ${params.ENVIRONMENT}
 Proyecto: ${params.PROYECT_ID}
 Región: ${params.REGION}
 Fecha: ${new Date()}
 Build URL: ${env.BUILD_URL}"""
-                        ]
+                ]
 
-                        sh "curl -H 'Content-Type: application/json' -d '${groovy.json.JsonOutput.toJson(teamsMessage)}' -X POST https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR-A1"
-                    }
-                }
+                sh "curl -H 'Content-Type: application/json' -d '${groovy.json.JsonOutput.toJson(teamsMessage)}' -X POST https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR-A1"
             }
         }
     }
+}
+
 
     post {
         always {
