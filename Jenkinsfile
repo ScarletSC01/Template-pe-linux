@@ -1,6 +1,3 @@
-import groovy.json.JsonSlurper
-import groovy.json.JsonOutput
-
 pipeline {
     agent any
 
@@ -25,9 +22,10 @@ pipeline {
 
     parameters {
         string(name: 'PROYECT_ID', defaultValue: '', description: 'ID del proyecto en GCP')
-        string(name: 'REGION', defaultValue: 'us-central1', description: 'Región de despliegue')
+        string(name: 'REGION', defaultValue: 'us-central1', description: 'Región')
         string(name: 'ZONE', defaultValue: 'us-central1-a', description: 'Zona')
         choice(name: 'ENVIRONMENT', choices: ['desarrollo-1', 'pre-productivo-2', 'produccion-3'], description: 'Ambiente')
+
         string(name: 'VM_NAME', defaultValue: 'vm-pe-linux', description: 'Nombre VM')
         choice(name: 'PROCESSOR_TECH', choices: ['n2', 'e2'], description: 'Procesador')
         choice(name: 'VM_TYPE', choices: ['n2-standard', 'e2-standard'], description: 'Tipo VM')
@@ -37,28 +35,30 @@ pipeline {
         string(name: 'DISK_SIZE', defaultValue: '100', description: 'Disco GB')
         choice(name: 'DISK_TYPE', choices: ['pd-ssd','pd-balanced','pd-standard'], description: 'Tipo disco')
         choice(name: 'INFRAESTRUCTURE_TYPE', choices: ['On-demand','Preemptible'], description: 'Infraestructura')
+
         string(name: 'VPC_NETWORK', defaultValue: 'vpc-pe-01', description: 'VPC')
         string(name: 'SUBNET', defaultValue: 'subnet-pe-01', description: 'Subred')
         string(name: 'NETWORK_SEGMENT', defaultValue: '10.0.1.0/24', description: 'Segmento red')
         string(name: 'INTERFACE', defaultValue: 'nic0', description: 'Interfaz')
         choice(name: 'PRIVATE_IP', choices: ['true','false'], description: 'IP Privada')
         choice(name: 'PUBLIC_IP', choices: ['false','true'], description: 'IP Pública')
+
         string(name: 'FIREWALL_RULES', defaultValue: 'allow-ssh', description: 'Firewall')
-        string(name: 'SERVICE_ACCOUNT', defaultValue: 'sa-plataforma@jenkins-terraform-demo-472920.iam.gserviceaccount.com', description: 'Cuenta servicio')
-        string(name: 'LABEL', defaultValue: '', description: 'Label')
+        string(name: 'SERVICE_ACCOUNT', defaultValue: 'sa-plataforma@jenkins-terraform-demo-472920.iam.gserviceaccount.com', description: 'Cuenta Servicio')
+        string(name: 'LABEL', defaultValue: 'app=demo', description: 'Label')
         choice(name: 'ENABLE_STARTUP_SCRIPT', choices: ['false','true'], description: 'Startup script')
         choice(name: 'ENABLE_DELETION_PROTECTION', choices: ['false','true'], description: 'Protección eliminación')
         choice(name: 'CHECK_DELETE', choices: ['false','true'], description: 'Confirmación borrado')
         choice(name: 'AUTO_DELETE_DISK', choices: ['true','false'], description: 'Auto delete disk')
+
         string(name: 'TICKET_JIRA', defaultValue: 'AJI-1', description: 'Ticket Jira')
     }
 
     stages {
-
         stage('Mostrar Variables Ocultas y Visibles') {
             steps {
                 script {
-                    echo "================== VARIABLES OCULTAS =================="
+                    echo "================== Variables Ocultas =================="
                     echo "PAIS: ${env.PAIS}"
                     echo "SISTEMA_OPERATIVO_BASE: ${env.SISTEMA_OPERATIVO_BASE}"
                     echo "SNAPSHOT_ENABLED: ${env.SNAPSHOT_ENABLED}"
@@ -68,9 +68,23 @@ pipeline {
                     echo "LABEL: ${env.LABEL}"
                     echo "ENABLE_STARTUP_SCRIPT: ${env.ENABLE_STARTUP_SCRIPT}"
 
-                    echo "================== VARIABLES VISIBLES =================="
+                    echo "================== Variables Visibles =================="
                     params.each { key, value ->
                         echo "${key}: ${value}"
+                    }
+                }
+            }
+        }
+
+        stage('Validación de Parámetros') {
+            steps {
+                script {
+                    def errores = []
+                    if (!params.SUBNET?.trim()) errores.add("SUBNET no puede estar vacío")
+                    if (!params.NETWORK_SEGMENT?.trim()) errores.add("NETWORK_SEGMENT no puede estar vacío")
+                    if (errores) {
+                        errores.each { echo it }
+                        error("Validación de parámetros fallida")
                     }
                 }
             }
@@ -91,42 +105,40 @@ pipeline {
             }
         }
 
+        // --- BLOQUES TERRAFORM COMENTADOS ---
+        /*
+        stage('Terraform Init & Plan') { ... }
+        stage('Terraform Apply') { ... }
+        stage('Terraform Destroy') { ... }
+        */
+
         stage('Jira: Validar y Finalizar Ticket') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
-
                         def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
 
-                        // Obtener estado del ticket
-                        def response = sh(
-                            script: """
-                                curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \\
-                                -H "Authorization: Basic ${auth}" \\
-                                -H "Accept: application/json"
-                            """,
-                            returnStdout: true
-                        ).trim()
+                        // Obtener estado
+                        def response = sh(script: """
+                            curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \\
+                            -H "Authorization: Basic ${auth}" \\
+                            -H "Accept: application/json"
+                        """, returnStdout: true).trim()
 
-                        def ticketJson = new groovy.json.JsonSlurper().parseText(response)
-                        def estado = ticketJson.fields.status.name
+                        def estado = new groovy.json.JsonSlurper().parseText(response)?.fields?.status?.name
                         echo "Estado actual del ticket ${params.TICKET_JIRA}: ${estado}"
 
                         def transitionMessage = ""
 
-                        // Si el ticket está "En curso", pasar a Finalizado
-                        if(estado.toLowerCase() == "en curso") {
-                            def transitionsResponse = sh(
-                                script: """
-                                    curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \\
-                                    -H "Authorization: Basic ${auth}" \\
-                                    -H "Accept: application/json"
-                                """,
-                                returnStdout: true
-                            ).trim()
+                        if (estado?.toLowerCase() == "en curso") {
+                            def transitionsResp = sh(script: """
+                                curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \\
+                                -H "Authorization: Basic ${auth}" \\
+                                -H "Accept: application/json"
+                            """, returnStdout: true).trim()
 
-                            def transitions = new groovy.json.JsonSlurper().parseText(transitionsResponse)
-                            def finalizadoId = transitions.transitions.find { it.name.toLowerCase().contains("finalizado") }?.id
+                            def finalizadoId = new groovy.json.JsonSlurper().parseText(transitionsResp)
+                                                ?.transitions?.find { it.name.toLowerCase().contains("finalizado") }?.id
 
                             if(finalizadoId) {
                                 sh """
@@ -144,26 +156,22 @@ pipeline {
                             transitionMessage = "Ticket ${params.TICKET_JIRA} no estaba 'En curso', no se realizó transición."
                         }
 
-                        // Enviar a Teams
-                        writeFile file: 'teams_message.json', text: groovy.json.JsonOutput.toJson([
+                        // Notificación Teams
+                        def teamsMsg = groovy.json.JsonOutput.toJson([
                             text: "Pipeline ejecutado. Ticket ${params.TICKET_JIRA} estado: ${estado}. ${transitionMessage}"
                         ])
+                        writeFile file: 'teams_message.json', text: teamsMsg
                         sh "curl -H 'Content-Type: application/json' -d @teams_message.json ${TEAMS_WEBHOOK}"
                         echo "Notificación enviada a Teams."
                     }
                 }
             }
         }
-
     }
 
     post {
-        success {
-            echo "Pipeline ejecutado exitosamente"
-        }
-        failure {
-            echo "Pipeline falló durante la ejecución"
-        }
+        success { echo "Pipeline ejecutado exitosamente" }
+        failure { echo "Pipeline falló durante la ejecución" }
         always {
             echo "================================================"
             echo "            FIN DE LA EJECUCIÓN                "
