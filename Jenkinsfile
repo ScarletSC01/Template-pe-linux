@@ -1,4 +1,4 @@
-pipeline { 
+pipeline {  
     agent any
 
     environment {
@@ -116,13 +116,67 @@ pipeline {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
                         def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
-                        sh """
-                            curl -s -X POST "https://bancoripley1.atlassian.net/rest/api/3/issue/${params.TICKET_JIRA}/transitions" \
+
+                        // Consultar estado actual
+                        def response = sh(script: """
+                            curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \
                             -H "Authorization: Basic ${auth}" \
-                            -H "Content-Type: application/json" \
-                            -d '{"transition": {"id": "31"}}'
-                        """
-                        echo "Ticket ${params.TICKET_JIRA} marcado como 'Finalizado'."
+                            -H "Accept: application/json"
+                        """, returnStdout: true).trim()
+
+                        def json = new groovy.json.JsonSlurper().parseText(response)
+                        def estado = json.fields.status.name
+                        echo "Estado actual del ticket ${params.TICKET_JIRA}: ${estado}"
+
+                        def estadosFinalizados = ["Finalizado", "Done", "Closed", "Completado"]
+
+                        if (estadosFinalizados.contains(estado)) {
+                            echo "El ticket ${params.TICKET_JIRA} ya se encuentra en estado '${estado}'. No se realizará transición."
+
+                            def comentario = "El ticket ${params.TICKET_JIRA} ya estaba en estado '${estado}' al momento de la ejecución del pipeline."
+
+                            sh """
+                                curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" \
+                                -H "Authorization: Basic ${auth}" \
+                                -H "Content-Type: application/json" \
+                                -d '{
+                                    "body": {
+                                        "type": "doc",
+                                        "version": 1,
+                                        "content": [{
+                                            "type": "paragraph",
+                                            "content": [{"type": "text", "text": "${comentario}"}]
+                                        }]
+                                    }
+                                }'
+                            """
+                        } else {
+                            echo "Cambiando estado del ticket ${params.TICKET_JIRA} a 'Finalizado'..."
+                            sh """
+                                curl -s -X POST "https://bancoripley1.atlassian.net/rest/api/3/issue/${params.TICKET_JIRA}/transitions" \
+                                -H "Authorization: Basic ${auth}" \
+                                -H "Content-Type: application/json" \
+                                -d '{"transition": {"id": "31"}}'
+                            """
+
+                            def comentario = "El ticket ${params.TICKET_JIRA} fue marcado automáticamente como 'Finalizado' por Jenkins."
+                            sh """
+                                curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" \
+                                -H "Authorization: Basic ${auth}" \
+                                -H "Content-Type: application/json" \
+                                -d '{
+                                    "body": {
+                                        "type": "doc",
+                                        "version": 1,
+                                        "content": [{
+                                            "type": "paragraph",
+                                            "content": [{"type": "text", "text": "${comentario}"}]
+                                        }]
+                                    }
+                                }'
+                            """
+                            echo "Ticket ${params.TICKET_JIRA} marcado como 'Finalizado'."
+                        }
                     }
                 }
             }
@@ -133,7 +187,6 @@ pipeline {
                 script {
                     def teamsWebhookUrl = 'https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR-A1'
 
-                    // Ordenar parámetros (ocultos primero, luego visibles)
                     def orden = [
                         'PAIS', 'SISTEMA_OPERATIVO_BASE', 'SNAPSHOT_ENABLED', 'JIRA_API_URL',
                         'PROYECT_ID', 'REGION', 'ZONE', 'ENVIRONMENT', 'VM_NAME', 'PROCESSOR_TECH',
