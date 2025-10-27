@@ -67,7 +67,9 @@ pipeline {
                     echo "ENABLE_STARTUP_SCRIPT: ${env.ENABLE_STARTUP_SCRIPT}"
 
                     echo "================== Variables Visibles =================="
-                    params.each { key, value -> echo "${key}: ${value}" }
+                    params.each { key, value ->
+                        echo "${key}: ${value}"
+                    }
                 }
             }
         }
@@ -86,25 +88,42 @@ pipeline {
             }
         }
 
-        stage('Validación de Ticket Jira') {
+        stage('Resumen Pre-Despliegue') {
+            steps {
+                script {
+                    echo "================================================"
+                    echo " RESUMEN DE CONFIGURACIÓN "
+                    echo "================================================"
+                    echo "Sistema Operativo Base: ${env.SISTEMA_OPERATIVO_BASE}"
+                    echo "Tipo de Procesador: ${params.PROCESSOR_TECH}"
+                    echo "Memoria RAM (GB): ${params.VM_MEMORY}"
+                    echo "Disco (GB): ${params.DISK_SIZE}"
+                    echo "Infraestructura: ${params.INFRAESTRUCTURE_TYPE}"
+                }
+            }
+        }
+
+        stage('Validación de Parámetros Jira') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
                         def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
-                        def estadoActual = ""
-                        def mensajeTeams = ""
+                        def estadoActual
+                        def mensajeTeams
 
                         echo "==============================================="
                         echo " Validando estado del ticket ${params.TICKET_JIRA}"
                         echo "==============================================="
 
+                        // Obtener datos del ticket
                         def response = sh(script: """
                             curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \
                             -H "Authorization: Basic ${auth}" \
                             -H "Accept: application/json"
                         """, returnStdout: true).trim()
 
-                        def issueData = new groovy.json.JsonSlurper().parseText(response)
+                        // Convertir inmediatamente a HashMap para evitar LazyMap
+                        def issueData = new HashMap<>(new groovy.json.JsonSlurper().parseText(response))
                         estadoActual = issueData?.fields?.status?.name ?: "Desconocido"
                         echo "Estado actual del ticket: ${estadoActual}"
 
@@ -112,18 +131,19 @@ pipeline {
                             mensajeTeams = groovy.json.JsonOutput.toJson([text: "Error: El ticket ${params.TICKET_JIRA} ya se encuentra en estado '${estadoActual}'. Ejecución detenida."])
                             writeFile file: 'teams_error.json', text: mensajeTeams
                             sh "curl -H 'Content-Type: application/json' -d @teams_error.json ${TEAMS_WEBHOOK}"
-                            error("Ticket en estado finalizado: ${estadoActual}")
+                            error("El ticket ${params.TICKET_JIRA} ya está '${estadoActual}'")
                         }
 
                         if (estadoActual.toLowerCase() == "en curso") {
                             echo "El ticket está en curso. Procediendo a cerrarlo automáticamente..."
+
                             def transitionsResp = sh(script: """
                                 curl -s -X GET "${JIRA_TRANSITIONS_URL}" \
                                 -H "Authorization: Basic ${auth}" \
                                 -H "Accept: application/json"
                             """, returnStdout: true).trim()
 
-                            def transitions = new groovy.json.JsonSlurper().parseText(transitionsResp)
+                            def transitions = new HashMap<>(new groovy.json.JsonSlurper().parseText(transitionsResp))
                             def finalizadoTransition = transitions?.transitions?.find {
                                 it.name.toLowerCase().contains("finalizado") || it.name.toLowerCase().contains("done")
                             }
@@ -133,7 +153,7 @@ pipeline {
                                     curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \
                                     -H "Authorization: Basic ${auth}" \
                                     -H "Content-Type: application/json" \
-                                    -d '${groovy.json.JsonOutput.toJson([transition: [id: finalizadoTransition.id]])}'
+                                    -d '{ "transition": { "id": "${finalizadoTransition.id}" } }'
                                 """
                                 mensajeTeams = groovy.json.JsonOutput.toJson([text: "Ticket ${params.TICKET_JIRA} pasó automáticamente de 'En curso' a 'Finalizado'."])
                                 writeFile file: 'teams_message.json', text: mensajeTeams
@@ -177,4 +197,3 @@ pipeline {
         }
     }
 }
-
