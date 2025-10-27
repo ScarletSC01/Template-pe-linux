@@ -1,4 +1,4 @@
-pipeline {
+pipeline {   
     agent any
 
     environment {
@@ -6,7 +6,7 @@ pipeline {
         SISTEMA_OPERATIVO_BASE = 'Linux'
         SNAPSHOT_ENABLED = 'true'
         JIRA_API_URL = "https://bancoripley1.atlassian.net/rest/api/3/issue/"
-        TEAMS_WEBHOOK = credentials('teams-webhook') // Webhook almacenado en Jenkins
+        JIRA_API_TOKEN = "" // Debes definirlo si usas autenticación básica
     }
 
     options {
@@ -58,6 +58,7 @@ pipeline {
                     if (!params.NETWORK_SEGMENT?.trim()) errores.add("El parámetro NETWORK_SEGMENT no puede estar vacío")
 
                     if (errores.size() > 0) {
+                        echo "Errores encontrados:"
                         errores.each { echo "  - ${it}" }
                         error("Validación fallida")
                     }
@@ -66,82 +67,43 @@ pipeline {
             }
         }
 
-        stage('Validar y Actualizar Ticket Jira') {
+        stage('Notify Teams') {
             steps {
                 script {
-                    def jiraTicket = params.TICKET_JIRA
-                    def jiraApiUrl = "${JIRA_API_URL}${jiraTicket}"
-                    def jiraUser = credentials('jira-user')
-                    def jiraToken = credentials('jira-token')
+                    def teamsWebhookUrl = "https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR-A1"
 
-                    echo "Consultando estado actual del ticket ${jiraTicket}..."
+                    // Obtener estado del ticket
+                    def jiraState = sh(script: "curl -s -X GET ${JIRA_API_URL}${params.TICKET_JIRA} -H 'Authorization: Basic ${JIRA_API_TOKEN}' -H 'Accept: application/json' | jq -r '.fields.status.name'", returnStdout: true).trim()
 
-                    def response = sh(
-                        script: """curl -s -u "${jiraUser}:${jiraToken}" -X GET -H "Content-Type: application/json" "${jiraApiUrl}" """,
-                        returnStdout: true
-                    ).trim()
-
-                    def status = sh(
-                        script: "echo '${response}' | jq -r '.fields.status.name'",
-                        returnStdout: true
-                    ).trim()
-
-                    echo "Estado actual en Jira: ${status}"
-
-                    if (status == "En progreso") {
-                        echo "Actualizando estado a Finalizado..."
+                    def ticketMessage = ""
+                    if (jiraState == "Finalizada") {
+                        ticketMessage = "El ticket ${params.TICKET_JIRA} ya estaba finalizado."
+                    } else {
                         sh """
-                            curl -s -u "${jiraUser}:${jiraToken}" -X POST \
-                            --data '{"transition":{"id":"31"}}' \
-                            -H "Content-Type: application/json" "${jiraApiUrl}/transitions"
+                        curl -s -X POST ${JIRA_API_URL}${params.TICKET_JIRA}/transitions \
+                        -H 'Authorization: Basic ${JIRA_API_TOKEN}' \
+                        -H 'Content-Type: application/json' \
+                        -d '{"transition": {"id": "31"}}'
                         """
-                        status = "Finalizado"
+                        ticketMessage = "El ticket ${params.TICKET_JIRA} fue cambiado a Finalizado."
                     }
 
-                    def teamsPayload = """
+                    def message = """
                     {
-                        "@type": "MessageCard",
-                        "@context": "https://schema.org/extensions",
-                        "themeColor": "0078D7",
-                        "summary": "Pipeline ejecutado",
-                        "sections": [{
-                            "activityTitle": "Pipeline ejecutado",
-                            "facts": [
-                                {"name": "Instancia VM", "value": "${params.VM_NAME}"},
-                                {"name": "Ambiente", "value": "${params.ENVIRONMENT}"},
-                                {"name": "Tipo de Servicio", "value": "GCP - Cloud SQL"},
-                                {"name": "Hora de Inicio del Backup", "value": "test"},
-                                {"name": "Días de Retención", "value": "test"},
-                                {"name": "Enlace de la Build", "value": "${env.BUILD_URL}"},
-                                {"name": "Estado del Ticket", "value": "${status}"}
-                            ],
-                            "markdown": true
-                        }]
+                        "title": "Pipeline ejecutado",
+                        "text": "Detalles de la Instancia:\\nInstancia VM: ${params.VM_NAME}\\nAmbiente: ${params.ENVIRONMENT}\\nTipo de Servicio: GCP - Cloud SQL\\nConfiguración de Backup:\\nHora de Inicio del Backup: test\\nDías de Retención: test\\nEnlace de la Build: ${env.BUILD_URL}\\n\\n${ticketMessage}"
                     }
                     """
+
                     sh """
-                        curl -H 'Content-Type: application/json' -d '${teamsPayload}' ${TEAMS_WEBHOOK}
+                    curl -H 'Content-Type: application/json' -d '${message}' ${teamsWebhookUrl}
                     """
                 }
-            }
-        }
-
-        stage('Mostrar Resumen') {
-            steps {
-                echo "----------------------------------------"
-                echo " PIPELINE FINALIZADO CORRECTAMENTE "
-                echo "----------------------------------------"
             }
         }
     }
 
     post {
-        success {
-            echo "Pipeline completado exitosamente."
-        }
-        failure {
-            echo "Error en la ejecución del pipeline."
-        }
         always {
             echo "================================================"
             echo "            FIN DE LA EJECUCIÓN                "
