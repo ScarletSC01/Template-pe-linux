@@ -51,10 +51,11 @@ pipeline {
         choice(name: 'CHECK_DELETE', choices: ['false', 'true'], description: 'Confirmación borrado')
         choice(name: 'AUTO_DELETE_DISK', choices: ['true', 'false'], description: 'Auto delete disk')
 
-        string(name: 'TICKET_JIRA', defaultValue: 'AJI-1', description: 'Ticket Jira')
+        string(name: 'TICKET_JIRA', defaultValue: 'AJI-83', description: 'Ticket Jira')
     }
 
     stages {
+
         stage('Mostrar Variables Ocultas y Visibles') {
             steps {
                 script {
@@ -69,9 +70,7 @@ pipeline {
                     echo "ENABLE_STARTUP_SCRIPT: ${env.ENABLE_STARTUP_SCRIPT}"
 
                     echo "================== Variables Visibles =================="
-                    params.each { key, value ->
-                        echo "${key}: ${value}"
-                    }
+                    params.each { key, value -> echo "${key}: ${value}" }
                 }
             }
         }
@@ -94,7 +93,7 @@ pipeline {
             steps {
                 script {
                     echo "================================================"
-                    echo "              RESUMEN DE CONFIGURACIÓN         "
+                    echo "              RESUMEN DE CONFIGURACIÓN          "
                     echo "================================================"
                     echo "Sistema Operativo Base: ${env.SISTEMA_OPERATIVO_BASE}"
                     echo "Tipo de Procesador: ${params.PROCESSOR_TECH}"
@@ -105,78 +104,90 @@ pipeline {
             }
         }
 
-        // --- BLOQUES TERRAFORM COMENTADOS ---
-        /*
-        stage('Terraform Init & Plan') { ... }
-        stage('Terraform Apply') { ... }
-        stage('Terraform Destroy') { ... }
-        */
-
         stage('Validación de Parámetros Jira') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
+
                         def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
+                        def issueKey = params.TICKET_JIRA
+                        def jiraBaseUrl = "${JIRA_API_URL}"
 
                         echo "==============================================="
-                        echo "   Validando estado del ticket ${params.TICKET_JIRA}"
+                        echo "  Validando estado del ticket ${issueKey}"
                         echo "==============================================="
 
                         def response = sh(script: """
-                            curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \
+                            curl -s -X GET "${jiraBaseUrl}${issueKey}" \
                             -H "Authorization: Basic ${auth}" \
                             -H "Accept: application/json"
                         """, returnStdout: true).trim()
 
-                        def issueData = new groovy.json.JsonSlurper().parseText(response)
-                        def estadoActual = issueData?.fields?.status?.name ?: "Desconocido"
+                        def issueMap = new groovy.json.JsonSlurperClassic().parseText(response)
+                        def estadoActual = issueMap?.fields?.status?.name?.toString() ?: "Desconocido"
 
                         echo "Estado actual del ticket: ${estadoActual}"
 
-                        if (estadoActual.toLowerCase() in ["done", "finalizado", "closed", "cerrado"]) {
-                            error("El ticket ${params.TICKET_JIRA} ya está en estado '${estadoActual}'. No se puede continuar con la ejecución.")
+                        if (estadoActual.toLowerCase() in ["done", "finalizado", "cerrado", "closed"]) {
+                            error("El ticket ${issueKey} ya está en estado '${estadoActual}'. No se puede continuar.")
                         }
 
-                        if (estadoActual.toLowerCase() == "en curso") {
-                            echo "El ticket está en curso. Procediendo a cerrarlo automáticamente..."
+                        if (estadoActual.toLowerCase() == "en curso" || estadoActual.toLowerCase() == "in progress") {
+                            echo "Buscando transición hacia 'Finalizado'..."
 
                             def transitionsResp = sh(script: """
-                                curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \
+                                curl -s -X GET "${jiraBaseUrl}${issueKey}/transitions" \
                                 -H "Authorization: Basic ${auth}" \
                                 -H "Accept: application/json"
                             """, returnStdout: true).trim()
 
-                            def transitions = new groovy.json.JsonSlurper().parseText(transitionsResp)
-                            def finalizadoTransition = transitions?.transitions?.find {
-                                it.name.toLowerCase().contains("finalizado") || it.name.toLowerCase().contains("done")
+                            def transitionsMap = new groovy.json.JsonSlurperClassic().parseText(transitionsResp)
+                            def transitionId = null
+
+                            if (transitionsMap?.transitions) {
+                                for (t in transitionsMap.transitions) {
+                                    def name = t?.name?.toString()?.toLowerCase()
+                                    if (name.contains("finalizado") || name.contains("done") || name.contains("cerrado")) {
+                                        transitionId = t.id?.toString()
+                                        break
+                                    }
+                                }
                             }
 
-                            if (finalizadoTransition) {
+                            if (transitionId) {
+                                echo "Transición encontrada: id=${transitionId}. Ejecutando cambio..."
                                 sh """
-                                    curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \
+                                    curl -s -X POST "${jiraBaseUrl}${issueKey}/transitions" \
                                     -H "Authorization: Basic ${auth}" \
                                     -H "Content-Type: application/json" \
-                                    -d '{ "transition": { "id": "${finalizadoTransition.id}" } }'
+                                    -d '{ "transition": { "id": "${transitionId}" } }'
                                 """
-                                echo "Ticket ${params.TICKET_JIRA} movido a estado 'Finalizado'."
-                                def msg = groovy.json.JsonOutput.toJson([text: "Ticket ${params.TICKET_JIRA} pasó de 'En curso' a 'Finalizado' automáticamente."])
-                                writeFile file: 'teams_message.json', text: msg
+                                echo "Ticket ${issueKey} movido a 'Finalizado'."
+
+                                def msgMap = [ text: "Ticket ${issueKey} pasó de 'En curso' a 'Finalizado' automáticamente." ]
+                                def msgJson = groovy.json.JsonOutput.toJson(msgMap)
+                                writeFile file: 'teams_message.json', text: msgJson
                                 sh "curl -H 'Content-Type: application/json' -d @teams_message.json ${TEAMS_WEBHOOK}"
+                                echo "Notificación enviada a Teams."
                             } else {
-                                error("No se encontró transición válida a 'Finalizado' para el ticket ${params.TICKET_JIRA}.")
+                                error("No se encontró transición válida a 'Finalizado' para el ticket ${issueKey}.")
                             }
                         } else {
-                            echo "El ticket ${params.TICKET_JIRA} no está en curso ni finalizado (estado: ${estadoActual}). Continuando..."
+                            echo "El ticket ${issueKey} está en estado '${estadoActual}'. Continuando..."
                         }
                     }
                 }
             }
         }
-    } 
+    }
 
     post {
-        success { echo "Pipeline ejecutado exitosamente" }
-        failure { echo "Pipeline falló durante la ejecución" }
+        success {
+            echo "Pipeline ejecutado exitosamente"
+        }
+        failure {
+            echo "Pipeline falló durante la ejecución"
+        }
         always {
             echo "================================================"
             echo "            FIN DE LA EJECUCIÓN                "
