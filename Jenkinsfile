@@ -127,9 +127,10 @@ pipeline {
                             -H "Accept: application/json"
                         """, returnStdout: true).trim()
 
-                        def issueData = new groovy.json.JsonSlurper().parseText(response)
-                        estadoActual = issueData?.fields?.status?.name ?: "Desconocido"
-                        echo "Estado actual del ticket: ${estadoActual}"
+                       def issueDataRaw = new groovy.json.JsonSlurper().parseText(response)
+                       def issueData = new HashMap<>(issueDataRaw) // <-- evita LazyMap
+                       estadoActual = issueData?.fields?.status?.name ?: "Desconocido"
+                       echo "Estado actual del ticket: ${estadoActual}"
 
                         if (estadoActual.toLowerCase() in ["done", "finalizado", "closed", "cerrado"]) {
                             mensajeTeams = "Error: El ticket ${params.TICKET_JIRA} ya se encuentra en estado '${estadoActual}'. Ejecución detenida."
@@ -146,7 +147,8 @@ pipeline {
                                 -H "Accept: application/json"
                             """, returnStdout: true).trim()
 
-                            def transitions = new groovy.json.JsonSlurper().parseText(transitionsResp)
+                            def transitionsRaw = new groovy.json.JsonSlurper().parseText(transitionsResp)
+                            def transitions = new HashMap<>(transitionsRaw)
                             def finalizadoTransition = transitions?.transitions?.find {
                                 it.name.toLowerCase().contains("finalizado") || it.name.toLowerCase().contains("done")
                             }
