@@ -1,4 +1,4 @@
-pipeline {   
+pipeline {
     agent any
 
     environment {
@@ -6,7 +6,6 @@ pipeline {
         SISTEMA_OPERATIVO_BASE = 'Linux'
         SNAPSHOT_ENABLED = 'true'
         JIRA_API_URL = "https://bancoripley1.atlassian.net/rest/api/3/issue/"
-        JIRA_API_TOKEN = "" // Debes definirlo si usas autenticación básica
     }
 
     options {
@@ -46,6 +45,7 @@ pipeline {
     }
 
     stages {
+
         stage('Validación de Parámetros') {
             steps {
                 script {
@@ -67,37 +67,67 @@ pipeline {
             }
         }
 
-        stage('Notify Teams') {
+        stage('Mostrar Variables') {
             steps {
                 script {
-                    def teamsWebhookUrl = "https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR-A1"
+                    echo "================================================"
+                    echo "          VARIABLES DEL PIPELINE                "
+                    echo "================================================"
+                    
+                    // Imprimir todas las variables ingresadas por usuario
+                    params.each { key, value ->
+                        echo "${key}: ${value}"
+                    }
 
-                    // Obtener estado del ticket
-                    def jiraState = sh(script: "curl -s -X GET ${JIRA_API_URL}${params.TICKET_JIRA} -H 'Authorization: Basic ${JIRA_API_TOKEN}' -H 'Accept: application/json' | jq -r '.fields.status.name'", returnStdout: true).trim()
+                    // Imprimir variables de entorno importantes
+                    echo "PAIS: ${env.PAIS}"
+                    echo "SISTEMA_OPERATIVO_BASE: ${env.SISTEMA_OPERATIVO_BASE}"
+                    echo "SNAPSHOT_ENABLED: ${env.SNAPSHOT_ENABLED}"
+                    echo "JIRA_API_URL: ${env.JIRA_API_URL}"
+                }
+            }
+        }
 
-                    def ticketMessage = ""
-                    if (jiraState == "Finalizada") {
-                        ticketMessage = "El ticket ${params.TICKET_JIRA} ya estaba finalizado."
-                    } else {
+        stage('Gestionar Jira y Teams') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
+                        // Consultar estado del ticket
+                        def issueResponse = sh(script: """curl -s -u $JIRA_USER:$JIRA_API_TOKEN -X GET ${JIRA_API_URL}${params.TICKET_JIRA} -H 'Accept: application/json'""", returnStdout: true).trim()
+                        def issueJson = readJSON text: issueResponse
+                        def status = issueJson.fields.status.name
+
+                        if (status != 'Finalizada') {
+                            echo "Estado actual del ticket ${params.TICKET_JIRA}: ${status}"
+                            echo "Cambiando estado del ticket a 'Finalizado'..."
+                            sh """
+                                curl -s -u $JIRA_USER:$JIRA_API_TOKEN -X POST ${JIRA_API_URL}${params.TICKET_JIRA}/transitions \
+                                -H 'Content-Type: application/json' \
+                                -d '{"transition": {"id": "31"}}'
+                            """
+                            echo "Ticket ${params.TICKET_JIRA} actualizado a Finalizado"
+                        } else {
+                            echo "El ticket ${params.TICKET_JIRA} ya está Finalizado"
+                        }
+
+                        // Notificar a Teams
+                        def teamsMessage = [
+                            title: "Pipeline ejecutado",
+                            text: """Detalles de la Instancia:
+Instancia VM: ${params.VM_NAME}
+Ambiente: ${params.ENVIRONMENT}
+Tipo de Servicio: GCP - Cloud SQL
+Configuración de Backup:
+Hora de Inicio del Backup: test
+Días de Retención: test
+Enlace de la Build: ${env.BUILD_URL}"""
+                        ]
                         sh """
-                        curl -s -X POST ${JIRA_API_URL}${params.TICKET_JIRA}/transitions \
-                        -H 'Authorization: Basic ${JIRA_API_TOKEN}' \
-                        -H 'Content-Type: application/json' \
-                        -d '{"transition": {"id": "31"}}'
+                            curl -H 'Content-Type: application/json' \
+                            -d '${groovy.json.JsonOutput.toJson(teamsMessage)}' \
+                            -X POST https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR-A1
                         """
-                        ticketMessage = "El ticket ${params.TICKET_JIRA} fue cambiado a Finalizado."
                     }
-
-                    def message = """
-                    {
-                        "title": "Pipeline ejecutado",
-                        "text": "Detalles de la Instancia:\\nInstancia VM: ${params.VM_NAME}\\nAmbiente: ${params.ENVIRONMENT}\\nTipo de Servicio: GCP - Cloud SQL\\nConfiguración de Backup:\\nHora de Inicio del Backup: test\\nDías de Retención: test\\nEnlace de la Build: ${env.BUILD_URL}\\n\\n${ticketMessage}"
-                    }
-                    """
-
-                    sh """
-                    curl -H 'Content-Type: application/json' -d '${message}' ${teamsWebhookUrl}
-                    """
                 }
             }
         }
