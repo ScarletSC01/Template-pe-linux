@@ -109,13 +109,11 @@ pipeline {
         stage('Terraform Destroy') { ... }
         */
 
-        stage('Validación de Parámetros Jira') {
+        stage('Validación y Notificación Teams (Jira)') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
                         def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
-                        def estadoActual = ""
-                        def mensajeTeams = ""
 
                         echo "==============================================="
                         echo " Validando estado del ticket ${params.TICKET_JIRA}"
@@ -127,16 +125,15 @@ pipeline {
                             -H "Accept: application/json"
                         """, returnStdout: true).trim()
 
-                       def issueDataRaw = new groovy.json.JsonSlurper().parseText(response)
-                       def issueData = new HashMap<>(issueDataRaw) // <-- evita LazyMap
-                       estadoActual = issueData?.fields?.status?.name ?: "Desconocido"
-                       echo "Estado actual del ticket: ${estadoActual}"
+                        def issueData = new groovy.json.JsonSlurperClassic().parseText(response)
+                        def estadoActual = issueData.fields.status.name ?: "Desconocido"
+                        echo "Estado actual del ticket: ${estadoActual}"
 
                         if (estadoActual.toLowerCase() in ["done", "finalizado", "closed", "cerrado"]) {
-                            mensajeTeams = "Error: El ticket ${params.TICKET_JIRA} ya se encuentra en estado '${estadoActual}'. Ejecución detenida."
-                            writeFile file: 'teams_error.json', text: groovy.json.JsonOutput.toJson([text: mensajeTeams])
+                            def mensaje = "Error: El ticket ${params.TICKET_JIRA} ya se encuentra en estado '${estadoActual}'. Ejecución detenida."
+                            writeFile file: 'teams_error.json', text: groovy.json.JsonOutput.toJson([text: mensaje])
                             sh "curl -H 'Content-Type: application/json' -d @teams_error.json ${TEAMS_WEBHOOK}"
-                            error(mensajeTeams)
+                            error(mensaje)
                         }
 
                         if (estadoActual.toLowerCase() == "en curso") {
@@ -147,9 +144,8 @@ pipeline {
                                 -H "Accept: application/json"
                             """, returnStdout: true).trim()
 
-                            def transitionsRaw = new groovy.json.JsonSlurper().parseText(transitionsResp)
-                            def transitions = new HashMap<>(transitionsRaw)
-                            def finalizadoTransition = transitions?.transitions?.find {
+                            def transitions = new groovy.json.JsonSlurperClassic().parseText(transitionsResp)
+                            def finalizadoTransition = transitions.transitions.find {
                                 it.name.toLowerCase().contains("finalizado") || it.name.toLowerCase().contains("done")
                             }
 
@@ -160,29 +156,18 @@ pipeline {
                                     -H "Content-Type: application/json" \
                                     -d '{ "transition": { "id": "${finalizadoTransition.id}" } }'
                                 """
-                                echo "Ticket ${params.TICKET_JIRA} movido a estado 'Finalizado'."
-                                mensajeTeams = "Ticket ${params.TICKET_JIRA} pasó automáticamente de 'En curso' a 'Finalizado'."
-                                writeFile file: 'teams_message.json', text: groovy.json.JsonOutput.toJson([text: mensajeTeams])
+                                def mensaje = "Ticket ${params.TICKET_JIRA} pasó automáticamente de 'En curso' a 'Finalizado'."
+                                writeFile file: 'teams_message.json', text: groovy.json.JsonOutput.toJson([text: mensaje])
                                 sh "curl -H 'Content-Type: application/json' -d @teams_message.json ${TEAMS_WEBHOOK}"
                             } else {
                                 error("No se encontró transición válida a 'Finalizado' para el ticket ${params.TICKET_JIRA}.")
                             }
                         } else {
-                            mensajeTeams = "El ticket ${params.TICKET_JIRA} tiene estado '${estadoActual}'. Continuando ejecución."
-                            writeFile file: 'teams_info.json', text: groovy.json.JsonOutput.toJson([text: mensajeTeams])
+                            def mensaje = "El ticket ${params.TICKET_JIRA} tiene estado '${estadoActual}'. Continuando ejecución."
+                            writeFile file: 'teams_info.json', text: groovy.json.JsonOutput.toJson([text: mensaje])
                             sh "curl -H 'Content-Type: application/json' -d @teams_info.json ${TEAMS_WEBHOOK}"
                         }
                     }
-                }
-            }
-        }
-
-        stage('Notificación Teams (Jira)') {
-            steps {
-                script {
-                    def msg = groovy.json.JsonOutput.toJson([text: "Pipeline finalizó correctamente. Ticket ${params.TICKET_JIRA} validado y actualizado."])
-                    writeFile file: 'teams_final.json', text: msg
-                    sh "curl -H 'Content-Type: application/json' -d @teams_final.json ${TEAMS_WEBHOOK}"
                 }
             }
         }
