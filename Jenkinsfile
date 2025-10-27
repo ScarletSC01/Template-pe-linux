@@ -31,25 +31,25 @@ pipeline {
         choice(name: 'VM_TYPE', choices: ['n2-standard', 'e2-standard'], description: 'Tipo VM')
         string(name: 'VM_CORES', defaultValue: '2', description: 'vCPUs')
         string(name: 'VM_MEMORY', defaultValue: '8', description: 'RAM GB')
-        choice(name: 'OS_TYPE', choices: ['linux-ubuntu-22','linux-ubuntu-20','linux-debian-12'], description: 'OS')
+        choice(name: 'OS_TYPE', choices: ['linux-ubuntu-22', 'linux-ubuntu-20', 'linux-debian-12'], description: 'OS')
         string(name: 'DISK_SIZE', defaultValue: '100', description: 'Disco GB')
-        choice(name: 'DISK_TYPE', choices: ['pd-ssd','pd-balanced','pd-standard'], description: 'Tipo disco')
-        choice(name: 'INFRAESTRUCTURE_TYPE', choices: ['On-demand','Preemptible'], description: 'Infraestructura')
+        choice(name: 'DISK_TYPE', choices: ['pd-ssd', 'pd-balanced', 'pd-standard'], description: 'Tipo disco')
+        choice(name: 'INFRAESTRUCTURE_TYPE', choices: ['On-demand', 'Preemptible'], description: 'Infraestructura')
 
         string(name: 'VPC_NETWORK', defaultValue: 'vpc-pe-01', description: 'VPC')
         string(name: 'SUBNET', defaultValue: 'subnet-pe-01', description: 'Subred')
         string(name: 'NETWORK_SEGMENT', defaultValue: '10.0.1.0/24', description: 'Segmento red')
         string(name: 'INTERFACE', defaultValue: 'nic0', description: 'Interfaz')
-        choice(name: 'PRIVATE_IP', choices: ['true','false'], description: 'IP Privada')
-        choice(name: 'PUBLIC_IP', choices: ['false','true'], description: 'IP Pública')
+        choice(name: 'PRIVATE_IP', choices: ['true', 'false'], description: 'IP Privada')
+        choice(name: 'PUBLIC_IP', choices: ['false', 'true'], description: 'IP Pública')
 
         string(name: 'FIREWALL_RULES', defaultValue: 'allow-ssh', description: 'Firewall')
         string(name: 'SERVICE_ACCOUNT', defaultValue: 'sa-plataforma@jenkins-terraform-demo-472920.iam.gserviceaccount.com', description: 'Cuenta Servicio')
         string(name: 'LABEL', defaultValue: 'app=demo', description: 'Label')
-        choice(name: 'ENABLE_STARTUP_SCRIPT', choices: ['false','true'], description: 'Startup script')
-        choice(name: 'ENABLE_DELETION_PROTECTION', choices: ['false','true'], description: 'Protección eliminación')
-        choice(name: 'CHECK_DELETE', choices: ['false','true'], description: 'Confirmación borrado')
-        choice(name: 'AUTO_DELETE_DISK', choices: ['true','false'], description: 'Auto delete disk')
+        choice(name: 'ENABLE_STARTUP_SCRIPT', choices: ['false', 'true'], description: 'Startup script')
+        choice(name: 'ENABLE_DELETION_PROTECTION', choices: ['false', 'true'], description: 'Protección eliminación')
+        choice(name: 'CHECK_DELETE', choices: ['false', 'true'], description: 'Confirmación borrado')
+        choice(name: 'AUTO_DELETE_DISK', choices: ['true', 'false'], description: 'Auto delete disk')
 
         string(name: 'TICKET_JIRA', defaultValue: 'AJI-1', description: 'Ticket Jira')
     }
@@ -122,7 +122,6 @@ pipeline {
                         echo "   Validando estado del ticket ${params.TICKET_JIRA}"
                         echo "==============================================="
 
-                        // --- Consultar estado actual ---
                         def response = sh(script: """
                             curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \
                             -H "Authorization: Basic ${auth}" \
@@ -134,12 +133,10 @@ pipeline {
 
                         echo "Estado actual del ticket: ${estadoActual}"
 
-                        // --- Validar si ya está finalizado ---
                         if (estadoActual.toLowerCase() in ["done", "finalizado", "closed", "cerrado"]) {
                             error("El ticket ${params.TICKET_JIRA} ya está en estado '${estadoActual}'. No se puede continuar con la ejecución.")
                         }
 
-                        // --- Si está en curso, pasarlo automáticamente a finalizado ---
                         if (estadoActual.toLowerCase() == "en curso") {
                             echo "El ticket está en curso. Procediendo a cerrarlo automáticamente..."
 
@@ -150,7 +147,9 @@ pipeline {
                             """, returnStdout: true).trim()
 
                             def transitions = new groovy.json.JsonSlurper().parseText(transitionsResp)
-                            def finalizadoTransition = transitions?.transitions?.find { it.name.toLowerCase().contains("finalizado") || it.name.toLowerCase().contains("done") }
+                            def finalizadoTransition = transitions?.transitions?.find {
+                                it.name.toLowerCase().contains("finalizado") || it.name.toLowerCase().contains("done")
+                            }
 
                             if (finalizadoTransition) {
                                 sh """
@@ -164,7 +163,7 @@ pipeline {
                                 writeFile file: 'teams_message.json', text: msg
                                 sh "curl -H 'Content-Type: application/json' -d @teams_message.json ${TEAMS_WEBHOOK}"
                             } else {
-                                error(" No se encontró transición válida a 'Finalizado' para el ticket ${params.TICKET_JIRA}.")
+                                error("No se encontró transición válida a 'Finalizado' para el ticket ${params.TICKET_JIRA}.")
                             }
                         } else {
                             echo "El ticket ${params.TICKET_JIRA} no está en curso ni finalizado (estado: ${estadoActual}). Continuando..."
@@ -173,8 +172,9 @@ pipeline {
                 }
             }
         }
+    } 
 
- post {
+    post {
         success { echo "Pipeline ejecutado exitosamente" }
         failure { echo "Pipeline falló durante la ejecución" }
         always {
