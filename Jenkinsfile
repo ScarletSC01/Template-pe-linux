@@ -1,4 +1,4 @@
-pipeline {  
+pipeline {
     agent any
 
     environment {
@@ -6,6 +6,7 @@ pipeline {
         SISTEMA_OPERATIVO_BASE = 'Linux'
         SNAPSHOT_ENABLED = 'true'
         JIRA_API_URL = "https://bancoripley1.atlassian.net/rest/api/3/issue/"
+        TEAMS_WEBHOOK = credentials('teams-webhook') // Webhook almacenado en Jenkins
     }
 
     options {
@@ -57,7 +58,6 @@ pipeline {
                     if (!params.NETWORK_SEGMENT?.trim()) errores.add("El parámetro NETWORK_SEGMENT no puede estar vacío")
 
                     if (errores.size() > 0) {
-                        echo "Errores encontrados:"
                         errores.each { echo "  - ${it}" }
                         error("Validación fallida")
                     }
@@ -66,173 +66,81 @@ pipeline {
             }
         }
 
-        stage('Consultar Estado en Jira') {
+        stage('Validar y Actualizar Ticket Jira') {
             steps {
                 script {
-                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
-                        def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
-                        def response = sh(script: """
-                            curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \
-                            -H "Authorization: Basic ${auth}" \
-                            -H "Accept: application/json"
-                        """, returnStdout: true).trim()
-                        def json = new groovy.json.JsonSlurper().parseText(response)
-                        def estado = json.fields.status.name
-                        echo "Estado actual del ticket ${params.TICKET_JIRA}: ${estado}"
-                    }
-                }
-            }
-        }
+                    def jiraTicket = params.TICKET_JIRA
+                    def jiraApiUrl = "${JIRA_API_URL}${jiraTicket}"
+                    def jiraUser = credentials('jira-user')
+                    def jiraToken = credentials('jira-token')
 
-        stage('Comentar en Jira') {
-            steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
-                        def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
-                        def comentario = "El ticket ${params.TICKET_JIRA} fue comentado y procesado automáticamente por Jenkins."
+                    echo "Consultando estado actual del ticket ${jiraTicket}..."
 
+                    def response = sh(
+                        script: """curl -s -u "${jiraUser}:${jiraToken}" -X GET -H "Content-Type: application/json" "${jiraApiUrl}" """,
+                        returnStdout: true
+                    ).trim()
+
+                    def status = sh(
+                        script: "echo '${response}' | jq -r '.fields.status.name'",
+                        returnStdout: true
+                    ).trim()
+
+                    echo "Estado actual en Jira: ${status}"
+
+                    if (status == "En progreso") {
+                        echo "Actualizando estado a Finalizado..."
                         sh """
-                            curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" \
-                            -H "Authorization: Basic ${auth}" \
-                            -H "Content-Type: application/json" \
-                            -d '{
-                                "body": {
-                                    "type": "doc",
-                                    "version": 1,
-                                    "content": [{
-                                        "type": "paragraph",
-                                        "content": [{"type": "text", "text": "${comentario}"}]
-                                    }]
-                                }
-                            }'
+                            curl -s -u "${jiraUser}:${jiraToken}" -X POST \
+                            --data '{"transition":{"id":"31"}}' \
+                            -H "Content-Type: application/json" "${jiraApiUrl}/transitions"
                         """
+                        status = "Finalizado"
                     }
-                }
-            }
-        }
 
-        stage('Cambiar estado del Ticket a Finalizado') {
-            steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
-                        def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
-
-                        // Consultar estado actual
-                        def response = sh(script: """
-                            curl -s -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" \
-                            -H "Authorization: Basic ${auth}" \
-                            -H "Accept: application/json"
-                        """, returnStdout: true).trim()
-
-                        def json = new groovy.json.JsonSlurper().parseText(response)
-                        def estado = json.fields.status.name
-                        echo "Estado actual del ticket ${params.TICKET_JIRA}: ${estado}"
-
-                        def estadosFinalizados = ["Finalizado", "Done", "Closed", "Completado"]
-
-                        if (estadosFinalizados.contains(estado)) {
-                            echo "El ticket ${params.TICKET_JIRA} ya se encuentra en estado '${estado}'. No se realizará transición."
-
-                            def comentario = "El ticket ${params.TICKET_JIRA} ya estaba en estado '${estado}' al momento de la ejecución del pipeline."
-
-                            sh """
-                                curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" \
-                                -H "Authorization: Basic ${auth}" \
-                                -H "Content-Type: application/json" \
-                                -d '{
-                                    "body": {
-                                        "type": "doc",
-                                        "version": 1,
-                                        "content": [{
-                                            "type": "paragraph",
-                                            "content": [{"type": "text", "text": "${comentario}"}]
-                                        }]
-                                    }
-                                }'
-                            """
-                        } else {
-                            echo "Cambiando estado del ticket ${params.TICKET_JIRA} a 'Finalizado'..."
-                            sh """
-                                curl -s -X POST "https://bancoripley1.atlassian.net/rest/api/3/issue/${params.TICKET_JIRA}/transitions" \
-                                -H "Authorization: Basic ${auth}" \
-                                -H "Content-Type: application/json" \
-                                -d '{"transition": {"id": "31"}}'
-                            """
-
-                            def comentario = "El ticket ${params.TICKET_JIRA} fue marcado automáticamente como 'Finalizado' por Jenkins."
-                            sh """
-                                curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" \
-                                -H "Authorization: Basic ${auth}" \
-                                -H "Content-Type: application/json" \
-                                -d '{
-                                    "body": {
-                                        "type": "doc",
-                                        "version": 1,
-                                        "content": [{
-                                            "type": "paragraph",
-                                            "content": [{"type": "text", "text": "${comentario}"}]
-                                        }]
-                                    }
-                                }'
-                            """
-                            echo "Ticket ${params.TICKET_JIRA} marcado como 'Finalizado'."
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Notify Teams') {
-            steps {
-                script {
-                    def teamsWebhookUrl = 'https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR-A1'
-
-                    def orden = [
-                        'PAIS', 'SISTEMA_OPERATIVO_BASE', 'SNAPSHOT_ENABLED', 'JIRA_API_URL',
-                        'PROYECT_ID', 'REGION', 'ZONE', 'ENVIRONMENT', 'VM_NAME', 'PROCESSOR_TECH',
-                        'VM_TYPE', 'VM_CORES', 'VM_MEMORY', 'OS_TYPE', 'DISK_SIZE', 'DISK_TYPE',
-                        'INFRAESTRUCTURE_TYPE', 'VPC_NETWORK', 'SUBNET', 'NETWORK_SEGMENT',
-                        'INTERFACE', 'PRIVATE_IP', 'PUBLIC_IP', 'FIREWALL_RULES', 'SERVICE_ACCOUNT',
-                        'LABEL', 'ENABLE_STARTUP_SCRIPT', 'ENABLE_DELETION_PROTECTION', 'CHECK_DELETE',
-                        'AUTO_DELETE_DISK', 'TICKET_JIRA'
-                    ]
-
-                    def parametros = orden.collect { key ->
-                        if (params.containsKey(key)) {
-                            return "${key} ${params[key]}"
-                        } else if (env.containsKey(key)) {
-                            return "${key} ${env[key]}"
-                        }
-                        return null
-                    }.findAll { it != null }.join("\n")
-
-                    def message = """
+                    def teamsPayload = """
                     {
                         "@type": "MessageCard",
-                        "@context": "http://schema.org/extensions",
-                        "summary": "Notificación de Jenkins",
-                        "themeColor": "0076D7",
-                        "title": "Pipeline finalizado - Linux",
-                        "text": "**El pipeline ha finalizado correctamente y el ticket fue marcado como Finalizado en Jira.**\\n${parametros}"
+                        "@context": "https://schema.org/extensions",
+                        "themeColor": "0078D7",
+                        "summary": "Pipeline ejecutado",
+                        "sections": [{
+                            "activityTitle": "Pipeline ejecutado",
+                            "facts": [
+                                {"name": "Instancia VM", "value": "${params.VM_NAME}"},
+                                {"name": "Ambiente", "value": "${params.ENVIRONMENT}"},
+                                {"name": "Tipo de Servicio", "value": "GCP - Cloud SQL"},
+                                {"name": "Hora de Inicio del Backup", "value": "test"},
+                                {"name": "Días de Retención", "value": "test"},
+                                {"name": "Enlace de la Build", "value": "${env.BUILD_URL}"},
+                                {"name": "Estado del Ticket", "value": "${status}"}
+                            ],
+                            "markdown": true
+                        }]
                     }
                     """
-
                     sh """
-                        curl -H 'Content-Type: application/json' \
-                            -d '${message}' \
-                            '${teamsWebhookUrl}'
+                        curl -H 'Content-Type: application/json' -d '${teamsPayload}' ${TEAMS_WEBHOOK}
                     """
                 }
+            }
+        }
+
+        stage('Mostrar Resumen') {
+            steps {
+                echo "----------------------------------------"
+                echo " PIPELINE FINALIZADO CORRECTAMENTE "
+                echo "----------------------------------------"
             }
         }
     }
 
     post {
         success {
-            echo "Pipeline ejecutado exitosamente"
+            echo "Pipeline completado exitosamente."
         }
         failure {
-            echo "Pipeline falló durante la ejecución"
+            echo "Error en la ejecución del pipeline."
         }
         always {
             echo "================================================"
