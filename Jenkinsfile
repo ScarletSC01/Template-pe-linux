@@ -67,7 +67,33 @@ pipeline {
                     echo "ENABLE_STARTUP_SCRIPT: ${env.ENABLE_STARTUP_SCRIPT}"
 
                     echo "================== Variables Visibles =================="
-                    params.each { key, value -> echo "${key}: ${value}" }
+                    echo "PROYECT_ID: ${params.PROYECT_ID}"
+                    echo "REGION: ${params.REGION}"
+                    echo "ZONE: ${params.ZONE}"
+                    echo "ENVIRONMENT: ${params.ENVIRONMENT}"
+                    echo "VM_NAME: ${params.VM_NAME}"
+                    echo "PROCESSOR_TECH: ${params.PROCESSOR_TECH}"
+                    echo "VM_TYPE: ${params.VM_TYPE}"
+                    echo "VM_CORES: ${params.VM_CORES}"
+                    echo "VM_MEMORY: ${params.VM_MEMORY}"
+                    echo "OS_TYPE: ${params.OS_TYPE}"
+                    echo "DISK_SIZE: ${params.DISK_SIZE}"
+                    echo "DISK_TYPE: ${params.DISK_TYPE}"
+                    echo "INFRAESTRUCTURE_TYPE: ${params.INFRAESTRUCTURE_TYPE}"
+                    echo "VPC_NETWORK: ${params.VPC_NETWORK}"
+                    echo "SUBNET: ${params.SUBNET}"
+                    echo "NETWORK_SEGMENT: ${params.NETWORK_SEGMENT}"
+                    echo "INTERFACE: ${params.INTERFACE}"
+                    echo "PRIVATE_IP: ${params.PRIVATE_IP}"
+                    echo "PUBLIC_IP: ${params.PUBLIC_IP}"
+                    echo "FIREWALL_RULES: ${params.FIREWALL_RULES}"
+                    echo "SERVICE_ACCOUNT: ${params.SERVICE_ACCOUNT}"
+                    echo "LABEL: ${params.LABEL}"
+                    echo "ENABLE_STARTUP_SCRIPT: ${params.ENABLE_STARTUP_SCRIPT}"
+                    echo "ENABLE_DELETION_PROTECTION: ${params.ENABLE_DELETION_PROTECTION}"
+                    echo "CHECK_DELETE: ${params.CHECK_DELETE}"
+                    echo "AUTO_DELETE_DISK: ${params.AUTO_DELETE_DISK}"
+                    echo "TICKET_JIRA: ${params.TICKET_JIRA}"
                 }
             }
         }
@@ -109,6 +135,7 @@ pipeline {
                         echo " Validando estado del ticket ${params.TICKET_JIRA}"
                         echo "==============================================="
 
+                        // Obtener estado actual
                         def estado = sh(script: """
                             bash -c '
                             curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
@@ -119,15 +146,19 @@ pipeline {
 
                         echo "Estado actual del ticket: ${estado}"
 
+                        // Si ya está finalizado → error Teams + detener pipeline
                         if (estado.toLowerCase() in ['done', 'finalizado', 'cerrado', 'completado']) {
                             def msgError = groovy.json.JsonOutput.toJson([
                                 text: "El ticket ${params.TICKET_JIRA} ya se encuentra en estado '${estado}'. No se puede continuar con la ejecución del pipeline."
                             ])
-                            writeFile file: 'teams_error.json', text: msgError
-                            sh "curl -H 'Content-Type: application/json' -d @teams_error.json ${TEAMS_WEBHOOK}"
+                            sh """
+                                curl -X POST -H 'Content-Type: application/json' \
+                                --data-raw '${msgError}' ${TEAMS_WEBHOOK}
+                            """
                             error("Ticket ${params.TICKET_JIRA} ya se encuentra en estado ${estado}. Pipeline detenido.")
                         }
 
+                        // Si está en curso → pasar automáticamente a Done
                         if (estado.toLowerCase() in ['in progress', 'en curso']) {
                             echo "Transicionando automáticamente el ticket ${params.TICKET_JIRA} al estado 'Done'..."
 
@@ -143,15 +174,19 @@ pipeline {
                             def msgOk = groovy.json.JsonOutput.toJson([
                                 text: "El ticket ${params.TICKET_JIRA} fue actualizado correctamente al estado 'Done'."
                             ])
-                            writeFile file: 'teams_ok.json', text: msgOk
-                            sh "curl -H 'Content-Type: application/json' -d @teams_ok.json ${TEAMS_WEBHOOK}"
-
+                            sh """
+                                curl -X POST -H 'Content-Type: application/json' \
+                                --data-raw '${msgOk}' ${TEAMS_WEBHOOK}
+                            """
                         } else {
+                            // Si está en otro estado → solo informar
                             def msgInfo = groovy.json.JsonOutput.toJson([
                                 text: "El ticket ${params.TICKET_JIRA} se encuentra en estado '${estado}'. No se realizó ningún cambio."
                             ])
-                            writeFile file: 'teams_info.json', text: msgInfo
-                            sh "curl -H 'Content-Type: application/json' -d @teams_info.json ${TEAMS_WEBHOOK}"
+                            sh """
+                                curl -X POST -H 'Content-Type: application/json' \
+                                --data-raw '${msgInfo}' ${TEAMS_WEBHOOK}
+                            """
                         }
                     }
                 }
