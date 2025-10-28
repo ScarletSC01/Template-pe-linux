@@ -12,7 +12,7 @@ pipeline {
         ENABLE_STARTUP_SCRIPT = 'true'
         JIRA_API_URL = "https://bancoripley1.atlassian.net/rest/api/3/issue/"
         JIRA_TRANSITIONS_URL = "https://bancoripley1.atlassian.net/rest/api/3/issue/AJI-83/transitions"
-        TEAMS_WEBHOOK = "https://accenture.webhook.office.com/webhookb2/870e2ab9-53bf-43f6-8655-376cbe11bd1c@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/f495e4cf395c416e83eae4fb3b9069fd/b08cc148-e951-496b-9f46-3f7e35f79570/V2r0-VttaFGsrZXpm8qS18JcqaHZ26SxRAT51CZvkTR-A1"
+        TEAMS_WEBHOOK = "https://accenture.webhook.office.com/webhookb2/8fb63984-6f5f-4c2a-a6d3-b4fce2feb8ee@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/334818fae3a84ae484512967d1d3f4f1/b08cc148-e951-496b-9f46-3f7e35f79570/V27mobtZgWmAzxIvjHCY5CMAFKPZptkEnQbT5z7X84QNQ1"
     }
 
     options {
@@ -67,10 +67,7 @@ pipeline {
                     echo "ENABLE_STARTUP_SCRIPT: ${env.ENABLE_STARTUP_SCRIPT}"
 
                     echo "================== Variables Visibles =================="
-                    // imprime las variables visibles en el orden en que vienen en params (ya definido)
-                    params.each { key, value ->
-                        echo "${key}: ${value}"
-                    }
+                    params.each { key, value -> echo "${key}: ${value}" }
                 }
             }
         }
@@ -104,14 +101,7 @@ pipeline {
             }
         }
 
-        /* === BLOQUES TERRAFORM COMENTADOS ===
-        stage('Terraform Init & Plan') { ... }
-        stage('Terraform Apply') { ... }
-        stage('Terraform Destroy') { ... }
-        */
-
-        // ---> BLOQUE JIRA: validar estado, cerrar si está "En curso" y notificar Teams
-                stage('Validación de Parámetros Jira') {
+        stage('Validación de Parámetros Jira') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
@@ -119,7 +109,6 @@ pipeline {
                         echo " Validando estado del ticket ${params.TICKET_JIRA}"
                         echo "==============================================="
 
-                        // Ejecutamos con bash -c y sin interpolar credenciales
                         def estado = sh(script: """
                             bash -c '
                             curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" -H "Accept: application/json" \
@@ -129,6 +118,7 @@ pipeline {
 
                         echo "Estado actual del ticket: ${estado}"
 
+                        // CASE 1: Ya finalizado o Done
                         if (estado.toLowerCase() in ['done','finalizado','closed','cerrado']) {
                             def mensaje = groovy.json.JsonOutput.toJson([text: "Error: El ticket ${params.TICKET_JIRA} ya se encuentra en estado '${estado}'. Ejecución detenida."])
                             writeFile file: 'teams_error.json', text: mensaje
@@ -136,6 +126,7 @@ pipeline {
                             error("El ticket ${params.TICKET_JIRA} ya está '${estado}'")
                         }
 
+                        // CASE 2: En curso → pasar a Finalizado
                         if (estado.toLowerCase() == 'en curso') {
                             echo "El ticket está en curso. Buscando transición a 'Finalizado'..."
 
@@ -148,23 +139,34 @@ pipeline {
 
                             if (transitionId) {
                                 echo "Usando transition id: ${transitionId} para mover ticket a Finalizado..."
+
+                                // Comentario en Jira
+                                sh """
+                                    bash -c 'curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" \
+                                    -H "Content-Type: application/json" \
+                                    -d "{\\"body\\": \\"Pipeline Jenkins: Se procede a mover el ticket a estado Finalizado automáticamente.\\"}"
+                                    '
+                                """
+
+                                // Transición
                                 sh """
                                     bash -c 'curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \
                                     -H "Content-Type: application/json" \
                                     -d "{\\"transition\\":{\\"id\\":\\"${transitionId}\\"}}"
                                     '
                                 """
+
                                 def okMsg = groovy.json.JsonOutput.toJson([text: "Ticket ${params.TICKET_JIRA} pasó automáticamente de 'En curso' a 'Finalizado' (transition id: ${transitionId})."])
                                 writeFile file: 'teams_message.json', text: okMsg
                                 sh "curl -H 'Content-Type: application/json' -d @teams_message.json ${TEAMS_WEBHOOK}"
                             } else {
-                                def warn = groovy.json.JsonOutput.toJson([text: "No se encontró transición a 'Finalizado' para ${params.TICKET_JIRA}."])
+                                def warn = groovy.json.JsonOutput.toJson([text: "No se encontró transición a 'Finalizado' o 'Done' para ${params.TICKET_JIRA}."])
                                 writeFile file: 'teams_warn.json', text: warn
                                 sh "curl -H 'Content-Type: application/json' -d @teams_warn.json ${TEAMS_WEBHOOK}"
-                                error("No se encontró transición válida a 'Finalizado'.")
+                                error("No se encontró transición válida a 'Finalizado' o 'Done'.")
                             }
                         } else {
-                            def info = groovy.json.JsonOutput.toJson([text: "Ticket ${params.TICKET_JIRA} en estado '${estado}'. Continuando la ejecución."])
+                            def info = groovy.json.JsonOutput.toJson([text: "Ticket ${params.TICKET_JIRA} en estado '${estado}'. No se requiere acción."])
                             writeFile file: 'teams_info.json', text: info
                             sh "curl -H 'Content-Type: application/json' -d @teams_info.json ${TEAMS_WEBHOOK}"
                         }
@@ -176,7 +178,7 @@ pipeline {
         stage('Notificación Final Teams') {
             steps {
                 script {
-                    def msg = groovy.json.JsonOutput.toJson([text: "Pipeline finalizó. Ticket ${params.TICKET_JIRA} validado y actualizado."])
+                    def msg = groovy.json.JsonOutput.toJson([text: "Pipeline finalizó correctamente. Ticket ${params.TICKET_JIRA} validado y actualizado."])
                     writeFile file: 'teams_final.json', text: msg
                     sh "curl -H 'Content-Type: application/json' -d @teams_final.json ${TEAMS_WEBHOOK}"
                 }
