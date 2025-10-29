@@ -152,7 +152,7 @@ pipeline {
       stage('Comentar en Jira') {
     steps {
         script {
-            withCredentials([string(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
+            withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
                 def comentario = """{
                     "body": "Validación completada. El ticket ${TICKET_JIRA} se encontraba en estado ${estado} y no requirió cambios."
                 }"""
