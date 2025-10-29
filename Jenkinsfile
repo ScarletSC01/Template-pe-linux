@@ -149,22 +149,20 @@ pipeline {
             }
         }
 
-        stage('Comentar en Jira') {
+      stage('Comentar en Jira') {
     steps {
         script {
             withCredentials([string(credentialsId: 'jira-api-token', variable: 'JIRA_API_TOKEN')]) {
-                sh '''
-                comentario=$(cat <<EOF
-                {
-                    "body": "Validación completada. El ticket '$TICKET_JIRA' se encuentra en estado '$estado'."
-                }
-                EOF
-                )
-                curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
-                    -X POST "https://bancoripley1.atlassian.net/rest/api/3/issue/$TICKET_JIRA/comment" \
+                def comentario = """{
+                    "body": "Validación completada. El ticket ${TICKET_JIRA} se encontraba en estado ${estado} y no requirió cambios."
+                }"""
+
+                sh """
+                    curl -s -u "${JIRA_USER}:${JIRA_API_TOKEN}" \
+                    -X POST "https://bancoripley1.atlassian.net/rest/api/3/issue/${TICKET_JIRA}/comment" \
                     -H "Content-Type: application/json" \
-                    --data "$comentario"
-                '''
+                    --data '${comentario}'
+                """
             }
         }
     }
