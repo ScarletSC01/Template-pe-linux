@@ -97,7 +97,7 @@ pipeline {
             }
         }
 
-        stage('Validación de Parámetros Básicos') {
+        stage('Validación de Parámetros') {
             steps {
                 script {
                     def errores = []
@@ -111,85 +111,95 @@ pipeline {
             }
         }
 
-      stage('Validación y Gestión de Jira') {
-    steps {
-        script {
-            withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
+        stage('Resumen Pre-Despliegue') {
+            steps {
+                script {
+                    echo "================================================"
+                    echo " RESUMEN DE CONFIGURACIÓN "
+                    echo "================================================"
+                    echo "Sistema Operativo Base: ${env.SISTEMA_OPERATIVO_BASE}"
+                    echo "Tipo de Procesador: ${params.PROCESSOR_TECH}"
+                    echo "Memoria RAM (GB): ${params.VM_MEMORY}"
+                    echo "Disco (GB): ${params.DISK_SIZE}"
+                    echo "Infraestructura: ${params.INFRAESTRUCTURE_TYPE}"
+                }
+            }
+        }
 
-                echo "==============================================="
-                echo " Validando estado del ticket ${params.TICKET_JIRA}"
-                echo "==============================================="
+        stage('Validación y Gestión de Jira') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
 
-                // Obtener estado actual
-                def estado = sh(script: """ bash -c '
-                    curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
-                    -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" -H "Accept: application/json" \
-                    | jq -r ".fields.status.name // \\"Desconocido\\""
-                ' """, returnStdout: true).trim()
+                        echo "==============================================="
+                        echo " Validando estado del ticket ${params.TICKET_JIRA}"
+                        echo "==============================================="
 
-                echo "Estado actual del ticket: ${estado}"
+                        def estado = sh(script: """ bash -c '
+                            curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
+                            -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" -H "Accept: application/json" \
+                            | jq -r ".fields.status.name // \\"Desconocido\\""
+                        ' """, returnStdout: true).trim()
 
-                // Mapear estado a ID de transición
-                def transiciones = [
-                    "To Do": "11",
-                    "In Progress": "21",
-                    "ATRASADO": "2",
-                    "Done": "31"
-                ]
+                        echo "Estado actual del ticket: ${estado}"
 
-                def mensajeEstados = [
-                    "To Do": "El ticket está pendiente de inicio.",
-                    "In Progress": "El ticket se encuentra en desarrollo activo.",
-                    "ATRASADO": "El ticket está atrasado, requiere atención.",
-                    "Done": "El ticket ya está finalizado."
-                ]
+                        def transiciones = [
+                            "To Do": "11",
+                            "In Progress": "21",
+                            "ATRASADO": "2",
+                            "Done": "31"
+                        ]
 
-                def transitionId = transiciones.get(estado, null)
-                def mensajeTeams = mensajeEstados.get(estado, "Estado desconocido, revisar Jira.")
+                        def mensajeEstados = [
+                            "To Do": "El ticket está pendiente de inicio.",
+                            "In Progress": "El ticket se encuentra en desarrollo activo.",
+                            "ATRASADO": "El ticket está atrasado, requiere atención.",
+                            "Done": "El ticket ya está finalizado."
+                        ]
 
-                // Notificación Teams sobre el estado actual
-                def payloadTeams = groovy.json.JsonOutput.toJson([text: "Ticket ${params.TICKET_JIRA} | Estado actual: ${estado} | Info: ${mensajeTeams}"])
-                writeFile file: 'teams.json', text: payloadTeams
-                sh "curl -X POST -H 'Content-Type: application/json' --data @teams.json ${TEAMS_WEBHOOK}"
+                        def transitionId = transiciones.get(estado, null)
+                        def mensajeTeams = mensajeEstados.get(estado, "Estado desconocido, revisar Jira.")
 
-                if (transitionId && estado != "Done") {
-                    echo "Transicionando automáticamente el ticket ${params.TICKET_JIRA} a ${estado}..."
+                        // Notificación Teams sobre el estado actual
+                        def payloadTeams = groovy.json.JsonOutput.toJson([text: "Ticket ${params.TICKET_JIRA} | Estado actual: ${estado} | Info: ${mensajeTeams}"])
+                        writeFile file: 'teams.json', text: payloadTeams
+                        sh "curl -X POST -H 'Content-Type: application/json' --data @teams.json ${TEAMS_WEBHOOK}"
 
-                    // Realizar transición
-                    def payloadTrans = groovy.json.JsonOutput.toJson([transition: [id: transitionId]])
-                    writeFile file: 'transicion.json', text: payloadTrans
-                    sh "curl -s -u '${JIRA_USER}:${JIRA_API_TOKEN}' -X POST '${JIRA_API_URL}${params.TICKET_JIRA}/transitions' -H 'Content-Type: application/json' --data @transicion.json"
+                        if (transitionId && estado != "Done") {
+                            echo "Transicionando automáticamente el ticket ${params.TICKET_JIRA} a ${estado}..."
 
-                    // Agregar comentario detallado en Jira
-                    def comentario = groovy.json.JsonOutput.toJson([
-                        body: [
-                            type: "doc",
-                            version: 1,
-                            content: [
-                                [
-                                    type: "paragraph",
+                            // Realizar transición
+                            def payloadTrans = groovy.json.JsonOutput.toJson([transition: [id: transitionId]])
+                            writeFile file: 'transicion.json', text: payloadTrans
+                            sh "curl -s -u '${JIRA_USER}:${JIRA_API_TOKEN}' -X POST '${JIRA_API_URL}${params.TICKET_JIRA}/transitions' -H 'Content-Type: application/json' --data @transicion.json"
+
+                            // Agregar comentario detallado en Jira
+                            def comentario = groovy.json.JsonOutput.toJson([
+                                body: [
+                                    type: "doc",
+                                    version: 1,
                                     content: [
-                                        [type: "text", text: "Pipeline ejecutado. Estado actualizado a '${estado}'. ${mensajeTeams}"]
+                                        [
+                                            type: "paragraph",
+                                            content: [
+                                                [type: "text", text: "Pipeline ejecutado. Estado actualizado a '${estado}'. ${mensajeTeams}"]
+                                            ]
+                                        ]
                                     ]
                                 ]
-                            ]
-                        ]
-                    ])
-                    writeFile file: 'comentario.json', text: comentario
-                    sh "curl -s -u '${JIRA_USER}:${JIRA_API_TOKEN}' -X POST '${JIRA_API_URL}${params.TICKET_JIRA}/comment' -H 'Content-Type: application/json' --data @comentario.json"
+                            ])
+                            writeFile file: 'comentario.json', text: comentario
+                            sh "curl -s -u '${JIRA_USER}:${JIRA_API_TOKEN}' -X POST '${JIRA_API_URL}${params.TICKET_JIRA}/comment' -H 'Content-Type: application/json' --data @comentario.json"
+                        }
+                    }
                 }
             }
         }
     }
-}
 
     post {
-        success {
-            echo "Pipeline ejecutado exitosamente"
-        }
-        failure {
-            echo "Pipeline falló durante la ejecución"
-        }
+        success { echo "Pipeline ejecutado exitosamente" }
+        failure { echo "Pipeline falló durante la ejecución" }
         always {
             echo "================================================"
             echo " FIN DE LA EJECUCIÓN "
