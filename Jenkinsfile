@@ -49,7 +49,6 @@ pipeline {
         choice(name: 'CHECK_DELETE', choices: ['false', 'true'], description: 'Confirmación borrado')
         choice(name: 'AUTO_DELETE_DISK', choices: ['true', 'false'], description: 'Auto delete disk')
         string(name: 'TICKET_JIRA', defaultValue: 'AJI-83', description: 'Ticket Jira')
-        choice(name: 'TARGET_STATE', choices: ['','To Do','In Progress','ATRASADO','Done'], description: 'Estado objetivo (déjalo vacío para no cambiar estado)')
 
     }
 
