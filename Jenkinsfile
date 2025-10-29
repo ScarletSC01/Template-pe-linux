@@ -111,55 +111,60 @@ pipeline {
             }
         }
 
-        stage('Validación de Parámetros Jira') {
-            steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
-                        echo "Validando estado del ticket ${params.TICKET_JIRA}..."
-
-                        // 🔹 Obtener estado actual
-                        env.ESTADO_TICKET = sh(script: """
-                            bash -c 'curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
-                            -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" -H "Accept: application/json" \
-                            | jq -r ".fields.status.name // \\"Desconocido\\""'
-                        """, returnStdout: true).trim()
-
-                        echo "Estado actual: ${env.ESTADO_TICKET}"
-
-                        // 🔹 Si está en Done → detener
-                        if (env.ESTADO_TICKET.toLowerCase() in ['done', 'cerrado', 'finalizado', 'completado']) {
-                            error("El ticket ${params.TICKET_JIRA} ya está en estado '${env.ESTADO_TICKET}'. Pipeline detenido.")
-                        }
-
-                        // 🔹 Si está en progreso → transicionar
-                        if (env.ESTADO_TICKET.toLowerCase() in ['in progress', 'en curso']) {
-                            echo "Transicionando el ticket ${params.TICKET_JIRA} a 'Done'..."
-                            sh """
-                                curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
-                                -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \
-                                -H "Content-Type: application/json" \
-                                -d '{ "transition": { "name": "Done" } }'
-                            """
-                            env.TRANSICION_REALIZADA = 'true'
-                        } else {
-                            env.TRANSICION_REALIZADA = 'false'
-                        }
-                    }
-                }
-            }
-        }
-
-      stage('Comentar en Jira') {
+       stage('Validación de Jira') {
     steps {
         script {
             withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
-                def comentario = """{
-                    "body": "Validación completada. El ticket ${TICKET_JIRA} se encontraba en estado ${estado} y no requirió cambios."
-                }"""
+                echo "Validando estado del ticket ${params.TICKET_JIRA}..."
 
+                // Obtener estado actual
+                env.ESTADO_TICKET = sh(script: """
+                    bash -c 'curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
+                    -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" -H "Accept: application/json" \
+                    | jq -r ".fields.status.name // \\"Desconocido\\""'
+                """, returnStdout: true).trim()
+
+                echo "Estado actual: ${env.ESTADO_TICKET}"
+
+                // Determinar transición según estado
+                env.TRANSICION_REALIZADA = 'false'
+                def transitionId = ""
+
+                switch(env.ESTADO_TICKET) {
+                    case "To Do":
+                        transitionId = "21" // a In Progress
+                        break
+                    case "In Progress":
+                        transitionId = "2"  // a ATRASADO
+                        break
+                    case "ATRASADO":
+                        transitionId = "31" // a Done
+                        break
+                    case "Done":
+                        transitionId = ""
+                        break
+                    default:
+                        transitionId = ""
+                }
+
+                // Ejecutar transición si corresponde
+                if (transitionId) {
+                    sh """
+                        curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
+                        -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/transitions" \
+                        -H "Content-Type: application/json" \
+                        -d '{ "transition": { "id": "${transitionId}" } }'
+                    """
+                    env.TRANSICION_REALIZADA = 'true'
+                }
+
+                // Comentar en Jira (sin incluir el ID de transición)
+                def comentario = """{
+                    "body": "Validación completada. El ticket ${params.TICKET_JIRA} se encontraba en estado ${env.ESTADO_TICKET}."
+                }"""
                 sh """
                     curl -s -u "${JIRA_USER}:${JIRA_API_TOKEN}" \
-                    -X POST "https://bancoripley1.atlassian.net/rest/api/3/issue/${TICKET_JIRA}/comment" \
+                    -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" \
                     -H "Content-Type: application/json" \
                     --data '${comentario}'
                 """
@@ -168,23 +173,34 @@ pipeline {
     }
 }
 
+stage('Notificar a Teams') {
+    steps {
+        script {
+            def mensajeTeams = ""
 
-        stage('Notificar en Teams') {
-            steps {
-                script {
-                    def mensaje = ""
-                    if (env.TRANSICION_REALIZADA == 'true') {
-                        mensaje = "El ticket ${params.TICKET_JIRA} fue movido a *Done* y se dejó comentario en Jira."
-                    } else {
-                        mensaje = "Validación Jira completada. El ticket ${params.TICKET_JIRA} sigue en estado '${env.ESTADO_TICKET}'."
-                    }
-
-                    def payload = groovy.json.JsonOutput.toJson([text: mensaje])
-                    sh """curl -X POST -H 'Content-Type: application/json' --data-raw '${payload}' ${TEAMS_WEBHOOK}"""
-                }
+            switch(env.ESTADO_TICKET) {
+                case "To Do":
+                    mensajeTeams = "El ticket ${params.TICKET_JIRA} estaba en 'To Do'. Se aplicó la transición correspondiente."
+                    break
+                case "In Progress":
+                    mensajeTeams = "El ticket ${params.TICKET_JIRA} estaba en 'In Progress'. Se aplicó la transición correspondiente."
+                    break
+                case "ATRASADO":
+                    mensajeTeams = "El ticket ${params.TICKET_JIRA} estaba en 'ATRASADO'. Se aplicó la transición correspondiente."
+                    break
+                case "Done":
+                    mensajeTeams = "El ticket ${params.TICKET_JIRA} ya estaba finalizado."
+                    break
+                default:
+                    mensajeTeams = "El ticket ${params.TICKET_JIRA} tiene un estado desconocido: '${env.ESTADO_TICKET}'."
             }
+
+            def payload = groovy.json.JsonOutput.toJson([text: mensajeTeams])
+            sh """curl -X POST -H 'Content-Type: application/json' --data-raw '${payload}' ${TEAMS_WEBHOOK}"""
         }
     }
+}
+
 
     post {
         success {
