@@ -189,6 +189,47 @@ pipeline {
             }
         }
     }
+     // 🔹 BLOQUE 2: COMENTAR EN JIRA 
+        stage('Post-Coment-jira') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
+                        def auth = java.util.Base64.encoder.encodeToString("${JIRA_USER}:${JIRA_API_TOKEN}".getBytes("UTF-8"))
+                        def comentario = "Este ticket fue actualizado correctamente"
+
+                        def response = sh(
+                            script: """
+                                curl -s -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" \\
+                                -H "Authorization: Basic ${auth}" \\
+                                -H "Content-Type: application/json" \\
+                                -d '{
+                                    "body": {
+                                        "type": "doc",
+                                        "version": 1,
+                                        "content": [
+                                            {
+                                                "type": "paragraph",
+                                                "content": [
+                                                    {
+                                                        "type": "text",
+                                                        "text": "${comentario}"
+                                                    }
+                                                ]
+                                            }
+                                        ]
+                                    }
+                                }'
+                            """,
+                            returnStdout: true
+                        ).trim()
+
+                        echo "Comentario enviado al ticket ${params.TICKET_JIRA}: ${response}"
+                    }
+                }
+            }
+        }
+    }
+
 
     post {
         success { echo "Pipeline ejecutado exitosamente" }
