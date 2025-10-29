@@ -128,41 +128,7 @@ pipeline {
             }
         }
 
-        stage('Validar Estado Jira') {
-            steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
-                        echo "Consultando estado actual del ticket ${params.TICKET_JIRA}..."
-
-                        def estadoActual = sh(script: """bash -c '
-                            curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
-                            -X GET "${JIRA_API_URL}${params.TICKET_JIRA}" -H "Accept: application/json" \
-                            | jq -r ".fields.status.name // \\"Desconocido\\""
-                        '""", returnStdout: true).trim()
-
-                        echo "Estado actual del ticket: ${estadoActual}"
-                        env.JIRA_ESTADO = estadoActual
-
-                        if (estadoActual == "Done") {
-                            echo "El ticket ya está finalizado. No se realizarán más acciones."
-
-                            def payloadTeams = groovy.json.JsonOutput.toJson([
-                                text: "Ticket ${params.TICKET_JIRA} | Estado actual: Finalizado"
-                            ])
-                            writeFile file: 'teams_done.json', text: payloadTeams
-                            sh "curl -X POST -H 'Content-Type: application/json' --data @teams_done.json ${TEAMS_WEBHOOK}"
-
-                            error("El ticket ya está en estado Done, pipeline detenido.")
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Cambiar Estado (si se indica)') {
-            when {
-                expression { params.TARGET_STATE?.trim() }
-            }
+       stage('Cambiar Estado en Jira') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
@@ -176,9 +142,9 @@ pipeline {
 
                         def estadoObjetivo = params.TARGET_STATE
                         def transitionId = transiciones[estadoObjetivo]
+                        echo "Cambiando el estado del ticket ${params.TICKET_JIRA} a '${estadoObjetivo}'..."
 
-                        echo "Actualizando ticket ${params.TICKET_JIRA} a '${estadoObjetivo}'..."
-
+                        // Cambiar estado en Jira
                         def payloadTrans = groovy.json.JsonOutput.toJson([transition: [id: transitionId]])
                         writeFile file: 'transicion.json', text: payloadTrans
 
@@ -189,41 +155,34 @@ pipeline {
                             --data @transicion.json
                         """
 
-                        env.JIRA_ESTADO = estadoObjetivo
-                    }
-                }
-            }
-        }
-
-        stage('Notificar a Teams y Agregar Comentario a Jira') {
-            steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
-
-                        def estado = env.JIRA_ESTADO ?: "Desconocido"
                         def mensajeSimple = [
                             "To Do"      : "Tareas por hacer",
                             "In Progress": "En progreso",
                             "ATRASADO"   : "Atrasado",
                             "Done"       : "Finalizado"
                         ]
-                        def texto = mensajeSimple.get(estado, "Sin estado asignado")
 
-                        // ===== Notificación a Teams =====
-                        def payloadTeams = groovy.json.JsonOutput.toJson([
-                            text: "Ticket ${params.TICKET_JIRA} | Estado actual: ${texto}"
-                        ])
-                        writeFile file: 'teams.json', text: payloadTeams
-                        sh "curl -X POST -H 'Content-Type: application/json' --data @teams.json ${TEAMS_WEBHOOK}"
+                        def texto = mensajeSimple.get(estadoObjetivo, "Sin estado asignado")
 
-                        // ===== Comentario en Jira =====
+                        // Mensaje base
+                        def mensajeFinal = "Ticket ${params.TICKET_JIRA} | Estado actual: ${texto}"
+
+                        // Si es Done, se agrega el motivo de detención
+                        if (estadoObjetivo == "Done") {
+                            mensajeFinal += " | Pipeline detenido intencionalmente (estado Done)"
+                        }
+
+                        // Guardar en variable global
+                        env.JIRA_MENSAJE = mensajeFinal
+
+                        // Agregar comentario en Jira
                         def comentario = groovy.json.JsonOutput.toJson([
                             body: [
                                 type: "doc",
                                 version: 1,
                                 content: [[
                                     type: "paragraph",
-                                    content: [[type: "text", text: "Ticket ${params.TICKET_JIRA} | Estado actual: ${texto}"]]
+                                    content: [[type: "text", text: mensajeFinal]]
                                 ]]
                             ]
                         ])
@@ -235,6 +194,21 @@ pipeline {
                             -H 'Content-Type: application/json' \
                             --data @comentario.json
                         """
+                    }
+                }
+            }
+        }
+
+        stage('Notificar a Teams') {
+            steps {
+                script {
+                    def payloadTeams = groovy.json.JsonOutput.toJson([text: env.JIRA_MENSAJE])
+                    writeFile file: 'teams.json', text: payloadTeams
+
+                    sh "curl -X POST -H 'Content-Type: application/json' --data @teams.json ${TEAMS_WEBHOOK}"
+
+                    if (params.TARGET_STATE == "Done") {
+                        error(env.JIRA_MENSAJE)
                     }
                 }
             }
