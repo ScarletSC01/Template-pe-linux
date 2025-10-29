@@ -150,28 +150,26 @@ pipeline {
         }
 
         stage('Comentar en Jira') {
-            steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
-                        def comentario = ""
-                        if (env.TRANSICION_REALIZADA == 'true') {
-                            comentario = "El ticket ${params.TICKET_JIRA} fue actualizado automáticamente al estado 'Done' por el pipeline Jenkins (${env.JOB_NAME} - build #${env.BUILD_NUMBER})."
-                        } else {
-                            comentario = "Validación completada. El ticket ${params.TICKET_JIRA} se encontraba en estado '${env.ESTADO_TICKET}' y no requirió cambios."
-                        }
-
-                        def body = groovy.json.JsonOutput.toJson([body: comentario])
-                        sh """
-                            curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
-                            -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" \
-                            -H "Content-Type: application/json" \
-                            --data-raw '${body}'
-                        """
-                        echo "Comentario agregado al ticket: ${params.TICKET_JIRA}"
-                    }
+    steps {
+        script {
+            withCredentials([string(credentialsId: 'jira-api-token', variable: 'JIRA_API_TOKEN')]) {
+                sh '''
+                comentario=$(cat <<EOF
+                {
+                    "body": "Validación completada. El ticket '$TICKET_JIRA' se encuentra en estado '$estado'."
                 }
+                EOF
+                )
+                curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
+                    -X POST "https://bancoripley1.atlassian.net/rest/api/3/issue/$TICKET_JIRA/comment" \
+                    -H "Content-Type: application/json" \
+                    --data "$comentario"
+                '''
             }
         }
+    }
+}
+
 
         stage('Notificar en Teams') {
             steps {
