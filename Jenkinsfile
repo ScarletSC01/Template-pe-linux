@@ -135,7 +135,6 @@ pipeline {
                         echo " Validando estado del ticket ${params.TICKET_JIRA}"
                         echo "==============================================="
 
-                        // Obtener estado actual
                         def estado = sh(script: """
                             bash -c '
                             curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
@@ -146,7 +145,6 @@ pipeline {
 
                         echo "Estado actual del ticket: ${estado}"
 
-                        // Si ya está finalizado → error Teams + detener pipeline
                         if (estado.toLowerCase() in ['done', 'finalizado', 'cerrado', 'completado']) {
                             def msgError = groovy.json.JsonOutput.toJson([
                                 text: "El ticket ${params.TICKET_JIRA} ya se encuentra en estado '${estado}'. No se puede continuar con la ejecución del pipeline."
@@ -158,7 +156,6 @@ pipeline {
                             error("Ticket ${params.TICKET_JIRA} ya se encuentra en estado ${estado}. Pipeline detenido.")
                         }
 
-                        // Si está en curso → pasar automáticamente a Done
                         if (estado.toLowerCase() in ['in progress', 'en curso']) {
                             echo "Transicionando automáticamente el ticket ${params.TICKET_JIRA} al estado 'Done'..."
 
@@ -171,15 +168,26 @@ pipeline {
                                 '
                             """, returnStdout: true).trim()
 
+                            // 🔹 Agregar comentario al ticket en Jira
+                            def comentario = groovy.json.JsonOutput.toJson([
+                                body: "El ticket fue automáticamente movido a 'Done' por el pipeline de Jenkins (${env.JOB_NAME} - Build #${env.BUILD_NUMBER})."
+                            ])
+                            sh """
+                                curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
+                                -X POST "${JIRA_API_URL}${params.TICKET_JIRA}/comment" \
+                                -H "Content-Type: application/json" \
+                                --data-raw '${comentario}'
+                            """
+
+                            // 🔹 Enviar notificación a Teams
                             def msgOk = groovy.json.JsonOutput.toJson([
-                                text: "El ticket ${params.TICKET_JIRA} fue actualizado correctamente al estado 'Done'."
+                                text: "El ticket ${params.TICKET_JIRA} fue actualizado automáticamente al estado 'Done' y se dejó un comentario en Jira."
                             ])
                             sh """
                                 curl -X POST -H 'Content-Type: application/json' \
                                 --data-raw '${msgOk}' ${TEAMS_WEBHOOK}
                             """
                         } else {
-                            // Si está en otro estado → solo informar
                             def msgInfo = groovy.json.JsonOutput.toJson([
                                 text: "El ticket ${params.TICKET_JIRA} se encuentra en estado '${estado}'. No se realizó ningún cambio."
                             ])
