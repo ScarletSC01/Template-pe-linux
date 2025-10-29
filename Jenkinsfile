@@ -132,16 +132,16 @@ pipeline {
 
                 switch(env.ESTADO_TICKET) {
                     case "To Do":
-                        transitionId = "11" // a In Progress
+                        transitionId = "21" // a In Progress
                         break
                     case "In Progress":
-                        transitionId = "21"  // a ATRASADO
+                        transitionId = "2"  // a ATRASADO
                         break
                     case "ATRASADO":
-                        transitionId = "2" // a Done
+                        transitionId = "31" // a Done
                         break
                     case "Done":
-                        transitionId = "31"
+                        transitionId = ""
                         break
                     default:
                         transitionId = ""
