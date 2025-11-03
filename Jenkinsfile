@@ -49,7 +49,6 @@ pipeline {
         choice(name: 'CHECK_DELETE', choices: ['false', 'true'], description: 'Confirmación borrado')
         choice(name: 'AUTO_DELETE_DISK', choices: ['true', 'false'], description: 'Auto delete disk')
         string(name: 'TICKET_JIRA', defaultValue: 'AJI-83', description: 'Ticket Jira')
-
     }
 
     stages {
@@ -128,12 +127,10 @@ pipeline {
             }
         }
 
-     stage('Validar y Transicionar Ticket Jira') {
+        stage('Validar y Transicionar Ticket Jira') {
             steps {
                 script {
                     withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
-
-                        echo "Consultando estado actual del ticket ${TICKET_JIRA}..."
 
                         def estado = sh(
                             script: """bash -c '
@@ -145,77 +142,18 @@ pipeline {
                             returnStdout: true
                         ).trim()
 
-                        echo " Estado actual: ${estado}"
-
-                        // IDs de transición Jira
-                        def transiciones = [
-                            "Tareas por hacer": "31" // directo a Done
-                        ]
+                        env.ESTADO_TICKET = estado
+                        echo "Estado actual del ticket: ${estado}"
 
                         if (estado == "Tareas por hacer") {
-                            def transitionId = transiciones[estado]
-                            def mensajeTeams = "Ticket ${TICKET_JIRA} cambió automáticamente de 'Tareas por hacer' a 'Finalizado (Done)'."
-                            def mensajeJira = "El ticket ${TICKET_JIRA} fue cerrado automáticamente por ejecución del pipeline."
-
-                            echo "Transicionando ticket ${TICKET_JIRA} a 'Done'..."
-
-                            // Realizar transición
-                            def payloadTrans = groovy.json.JsonOutput.toJson([transition: [id: transitionId]])
+                            def payloadTrans = groovy.json.JsonOutput.toJson([transition: [id: "31"]])
                             writeFile file: 'transicion.json', text: payloadTrans
                             sh """curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
                                  -X POST -H "Content-Type: application/json" \
                                  --data @transicion.json \
                                  "${JIRA_API_URL}${TICKET_JIRA}/transitions" """
-
-                            // Agregar comentario en Jira
-                            def comentario = groovy.json.JsonOutput.toJson([
-                                body: [
-                                    type: "doc",
-                                    version: 1,
-                                    content: [[
-                                        type: "paragraph",
-                                        content: [[type: "text", text: mensajeJira]]
-                                    ]]
-                                ]
-                            ])
-                            writeFile file: 'comentario.json', text: comentario
-                            sh """curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
-                                 -X POST -H "Content-Type: application/json" \
-                                 --data @comentario.json \
-                                 "${JIRA_API_URL}${TICKET_JIRA}/comment" """
-
-                            // Notificación Teams
-                            def payloadTeams = groovy.json.JsonOutput.toJson([text: mensajeTeams])
-                            writeFile file: 'teams_ok.json', text: payloadTeams
-                            sh "curl -s -X POST -H 'Content-Type: application/json' --data @teams_ok.json ${TEAMS_WEBHOOK}"
-
-                        } else {
-                            def mensajeError = "Ticket ${TICKET_JIRA} no puede ejecutarse. Estado actual: '${estado}'. Solo se permite si está en 'Tareas por hacer'."
-                            echo mensajeError
-
-                            // Comentario Jira
-                            def comentarioError = groovy.json.JsonOutput.toJson([
-                                body: [
-                                    type: "doc",
-                                    version: 1,
-                                    content: [[
-                                        type: "paragraph",
-                                        content: [[type: "text", text: mensajeError]]
-                                    ]]
-                                ]
-                            ])
-                            writeFile file: 'comentario_error.json', text: comentarioError
-                            sh """curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
-                                 -X POST -H "Content-Type: application/json" \
-                                 --data @comentario_error.json \
-                                 "${JIRA_API_URL}${TICKET_JIRA}/comment" """
-
-                            // Notificación Teams
-                            def payloadError = groovy.json.JsonOutput.toJson([text: mensajeError])
-                            writeFile file: 'teams_error.json', text: payloadError
-                            sh "curl -s -X POST -H 'Content-Type: application/json' --data @teams_error.json ${TEAMS_WEBHOOK}"
-
-                            error("Pipeline detenido: estado no permitido.")
+                        } else if (estado in ["Done", "Finalizado"]) {
+                            error("El ticket ${TICKET_JIRA} ya está en estado '${estado}'. No se puede volver a marcar.")
                         }
                     }
                 }
@@ -225,19 +163,117 @@ pipeline {
         stage('Notificar a Teams') {
             steps {
                 script {
-                    def mensaje = "Pipeline completado para ticket ${TICKET_JIRA}."
-                    def payloadTeams = groovy.json.JsonOutput.toJson([text: mensaje])
-                    writeFile file: 'teams_final.json', text: payloadTeams
+                    if (env.ESTADO_TICKET in ["Done", "Finalizado"]) {
+                        def mensajeError = "El ticket ${TICKET_JIRA} ya estaba '${env.ESTADO_TICKET}'. No se realizó nueva transición ni despliegue."
+                        def payloadError = groovy.json.JsonOutput.toJson([ text: mensajeError ])
+                        writeFile file: 'teams_error.json', text: payloadError
+                        sh "curl -s -X POST -H 'Content-Type: application/json' --data @teams_error.json ${TEAMS_WEBHOOK}"
+                        error("Pipeline detenido: ticket ya finalizado.")
+                    }
+
+                    def mensajeTeams = """Ticket ${TICKET_JIRA} cambió automáticamente de 'Tareas por hacer' a 'Finalizado (Done)'.
+
+Pipeline completado correctamente.
+
+Instancia de máquina virtual creada con los siguientes detalles:"""
+
+                    def facts = [
+                        [ name: "Pais", value: env.PAIS ],
+                        [ name: "Ambiente", value: params.ENVIRONMENT ],
+                        [ name: "Proyecto GCP", value: params.PROYECT_ID ],
+                        [ name: "Nombre de la VM", value: params.VM_NAME ],
+                        [ name: "Región/Zona", value: "${params.REGION}/${params.ZONE}" ],
+                        [ name: "Tipo de Máquina", value: params.VM_TYPE ],
+                        [ name: "vCPUs / RAM", value: "${params.VM_CORES} / ${params.VM_MEMORY} GB" ],
+                        [ name: "Disco", value: "${params.DISK_SIZE} GB (${params.DISK_TYPE})" ],
+                        [ name: "OS", value: params.OS_TYPE ],
+                        [ name: "Red", value: "${params.VPC_NETWORK} / ${params.SUBNET}" ]
+                    ]
+
+                    def card = [
+                        '@type': 'MessageCard',
+                        '@context': 'http://schema.org/extensions',
+                        text: mensajeTeams,
+                        summary: "Nueva VM creada",
+                        themeColor: "0076D7",
+                        sections: [[
+                            activitySubtitle: "Ticket Jira: ${params.TICKET_JIRA}",
+                            facts: facts,
+                            markdown: true
+                        ]],
+                        potentialAction: [[
+                            '@type': "OpenUri",
+                            name: "Ver Build",
+                            targets: [[ os: "default", uri: env.BUILD_URL ?: "" ]]
+                        ]]
+                    ]
+
+                    def payload = groovy.json.JsonOutput.toJson(card)
+                    writeFile file: 'teams_final.json', text: payload
                     sh "curl -s -X POST -H 'Content-Type: application/json' --data @teams_final.json ${TEAMS_WEBHOOK}"
+                }
+            }
+        }
+
+        stage('Descripción Jira') {
+            steps {
+                script {
+                    env.mensaje = """
+                    País: ${env.PAIS}
+                    VM: ${params.VM_NAME}
+                    Ambiente: ${params.ENVIRONMENT}
+                    Proyecto: ${params.PROYECT_ID}
+                    Región/Zona: ${params.REGION}/${params.ZONE}
+                    Tipo de VM: ${params.VM_TYPE}
+                    vCPUs: ${params.VM_CORES}
+                    RAM: ${params.VM_MEMORY} GB
+                    Disco: ${params.DISK_SIZE} GB (${params.DISK_TYPE})
+                    OS: ${params.OS_TYPE}
+                    VPC/Subnet: ${params.VPC_NETWORK} / ${params.SUBNET}
+                    IP Pública: ${params.PUBLIC_IP}
+                    Firewall: ${params.FIREWALL_RULES}
+                    """
+                }
+            }
+        }
+
+        stage('Crear Ticket en Jira') {
+            when { expression { params.ENVIRONMENT == 'produccion-3' } }
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'JIRA_TOKEN', usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
+
+                        def payloadMap = [
+                            fields: [
+                                project: [ key: "PRJ" ],
+                                summary: "Nueva VM desplegada - ${params.VM_NAME}",
+                                description: [
+                                    type: "doc",
+                                    version: 1,
+                                    content: [[
+                                        type: "paragraph",
+                                        content: [[type: "text", text: env.mensaje]]
+                                    ]]
+                                ],
+                                issuetype: [ name: "Task" ]
+                            ]
+                        ]
+
+                        def payloadJson = groovy.json.JsonOutput.toJson(payloadMap)
+                        sh """
+                            curl -s -u "$JIRA_USER:$JIRA_API_TOKEN" \
+                            -X POST -H "Content-Type: application/json" \
+                            -d '${payloadJson}' ${JIRA_API_URL}
+                        """
+                    }
                 }
             }
         }
     }
 
-
     post {
-        success { echo "Pipeline ejecutado exitosamente" }
-        failure { echo "Pipeline falló durante la ejecución" }
+        success { echo "Pipeline ejecutado correctamente." }
+        failure { echo "Error al ejecutar el pipeline." }
         always {
             echo "================================================"
             echo " FIN DE LA EJECUCIÓN "
