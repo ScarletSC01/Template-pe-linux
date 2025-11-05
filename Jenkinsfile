@@ -13,6 +13,8 @@ pipeline {
         JIRA_API_URL = "https://bancoripley1.atlassian.net/rest/api/3/issue/"
         TICKET_JIRA = "AJI-83"
         TEAMS_WEBHOOK = "https://accenture.webhook.office.com/webhookb2/8fb63984-6f5f-4c2a-a6d3-b4fce2feb8ee@e0793d39-0939-496d-b129-198edd916feb/IncomingWebhook/334818fae3a84ae484512967d1d3f4f1/b08cc148-e951-496b-9f46-3f7e35f79570/V27mobtZgWmAzxIvjHCY5CMAFKPZptkEnQbT5z7X84QNQ1"
+        // intentos máximos para crear instancia
+        MAX_RETRIES = 2
     }
 
     options {
@@ -160,6 +162,35 @@ pipeline {
             }
         }
 
+        stage('Crear Infraestructura en GCP') {
+            steps {
+                script {
+                    def attempt = 0
+                    def success = false
+
+                    while (attempt < env.MAX_RETRIES.toInteger() && !success) {
+                        attempt++
+                        echo "Intento #${attempt}: simulando creación de infraestructura..."
+
+                        try {
+                            // Simulación de fallo (puedes reemplazar 'false' con el comando real)
+                            sh 'false'
+
+                            echo "Simulación exitosa (esto no debería ocurrir con 'false')."
+                            success = true
+                        } catch (err) {
+                            echo "Error en el intento #${attempt}: ${err.getMessage()}"
+                            if (attempt == env.MAX_RETRIES.toInteger()) {
+                                error "Simulación fallida después de ${env.MAX_RETRIES} intentos."
+                            } else {
+                                echo "Reintentando..."
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         stage('Notificar a Teams') {
             steps {
                 script {
@@ -282,3 +313,4 @@ Instancia de máquina virtual creada con los siguientes detalles:"""
         }
     }
 }
+
