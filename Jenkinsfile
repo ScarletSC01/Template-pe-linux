@@ -162,6 +162,19 @@ pipeline {
             }
         }
 
+        stage('Validar Environment') {
+            steps {
+                script {
+                    def envValido = ['desarrollo-1', 'pre-productivo-2', 'produccion-3']
+                    if (!envValido.contains(params.ENVIRONMENT)) {
+                        error("El environment '${params.ENVIRONMENT}' no es válido. Debe ser uno de: ${envValido.join(', ')}")
+                    } else {
+                        echo "Environment '${params.ENVIRONMENT}' validado correctamente."
+                    }
+                }
+            }
+        }
+
         stage('Crear Infraestructura en GCP') {
             steps {
                 script {
@@ -173,9 +186,7 @@ pipeline {
                         echo "Intento #${attempt}: simulando creación de infraestructura..."
 
                         try {
-                            // Simulación de fallo (puedes reemplazar 'false' con el comando real)
                             sh 'false'
-
                             echo "Simulación exitosa (esto no debería ocurrir con 'false')."
                             success = true
                         } catch (err) {
